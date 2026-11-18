@@ -94,19 +94,48 @@ class TestCacheAndRefresh(Sandbox):
         target = cache.default_path()
         refresh.run_once(target, token="sk-x", fetch=usage,
                          fetch_profile=lambda t, timeout=10: PROFILE)
-        text = target.read_text(encoding="utf-8")
+        text = target.read_text(encoding="utf-8") + cache.plan_path().read_text(encoding="utf-8")
         for secret in ("secret@example.org", "secret-uuid", "sk-x"):
             self.assertNotIn(secret, text)
-        self.assertIn("Ultra plan", text)
+        self.assertEqual(sources.plan_from_cache(cache.read_plan()), ("Ultra", "ultra"))
 
-    def test_failed_plan_lookup_keeps_the_old_plan(self):
+    def test_plan_survives_a_failed_usage_lookup_and_vice_versa(self):
         target = cache.default_path()
-        refresh.run_once(target, "t", fetch=usage, fetch_profile=lambda t, timeout=10: PROFILE)
 
         def broken(t, timeout=10):
             raise OSError("offline")
+        refresh.run_once(target, "t", fetch=broken, fetch_profile=lambda t, timeout=10: PROFILE)
+        self.assertEqual(sources.plan_from_cache(cache.read_plan())[1], "ultra")
+        self.assertFalse(target.exists())
+        old = os.path.getmtime(cache.plan_path()) - 2 * refresh.PLAN_EVERY
+        os.utime(cache.plan_path(), (old, old))
         refresh.run_once(target, "t", fetch=usage, fetch_profile=broken)
-        self.assertEqual(json.loads(target.read_text())["plan"]["name"], "Ultra plan")
+        self.assertEqual(sources.plan_from_cache(cache.read_plan())[1], "ultra")
+        self.assertTrue(target.exists())
+
+    def test_plan_is_asked_at_most_hourly(self):
+        calls = []
+
+        def profile(t, timeout=10):
+            calls.append(1)
+            return PROFILE
+        for _ in range(3):
+            refresh.run_once(cache.default_path(), "t", fetch=usage, fetch_profile=profile)
+        self.assertEqual(len(calls), 1)
+
+    def test_rate_limit_backs_off_as_asked(self):
+        import urllib.error
+        target = cache.default_path()
+
+        def limited(t, timeout=10):
+            raise urllib.error.HTTPError(sources.USAGE_URL, 429, "Too Many Requests",
+                                         {"Retry-After": "900"}, None)
+        refresh.run_once(target, "t", fetch=limited)
+        self.assertTrue(cache.pause_after_failure(target, 60))
+        self.assertEqual(cache.failure_path(target).read_text(encoding="utf-8"), "900")
+        old = os.path.getmtime(cache.failure_path(target)) - 400
+        os.utime(cache.failure_path(target), (old, old))
+        self.assertTrue(cache.pause_after_failure(target, 60))   # 400 s < 900 s
 
     def test_injected_fetch_makes_no_hidden_profile_call(self):
         target = cache.default_path()

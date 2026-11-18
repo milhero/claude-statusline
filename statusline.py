@@ -103,15 +103,19 @@ def build_status(data, cfg):
 
     if cfg.get("live_lookup"):
         path = cache.default_path()
+        # The server's plan beats the credentials file, which stays stale
+        # after a plan change. A plan does not change by the hour, so the
+        # stored answer stays good for a week.
+        try:
+            from_server = sources.plan_from_cache(cache.read_plan())
+            if from_server:
+                status.plan, status.plan_tier = from_server
+        except Exception:
+            pass
         try:
             cached = cache.read(path, cfg.get("cache_seconds", 300))
             if cached is not None:
                 status.scoped = sources.scoped_gauge(cached)
-                # The server's plan beats the credentials file, which stays
-                # stale after a plan change.
-                from_server = sources.plan_from_cache(cached)
-                if from_server:
-                    status.plan, status.plan_tier = from_server
                 # The lookup knows the server's state across all surfaces,
                 # Claude Code's input only this session. Which is fresher
                 # depends on where the last work happened.
@@ -127,8 +131,9 @@ def build_status(data, cfg):
         due_lookup = False
         if cfg.get("live_lookup"):
             limit = cfg.get("cache_seconds", 300)
-            due_lookup = (cache.is_stale(path, limit)
-                          and not cache.pause_after_failure(path, limit))
+            due_lookup = ((cache.is_stale(path, limit)
+                           and not cache.pause_after_failure(path, limit))
+                          or cache.is_stale(cache.plan_path(), refresh.PLAN_EVERY))
         if due_lookup or (cfg.get("cost_tracking") and refresh.collect_due()):
             refresh.spawn(sys.executable, Path(__file__).resolve())
     except Exception:
@@ -275,7 +280,7 @@ def diagnose(env=None):
     else:
         shown, tier = sources.read_plan(keychain=True)
         lines.append(d["plan_file"].format(shown or "?", tier or "-"))
-    server = sources.plan_from_cache(cache.read(cache.default_path(), cache.MAX_AGE) or {})
+    server = sources.plan_from_cache(cache.read_plan())
     lines.append(d["plan_server"].format("{} ({})".format(*server) if server else d["not_yet"]))
 
     c = cache.default_path()
@@ -299,7 +304,8 @@ def diagnose(env=None):
                 len(answer.get("limits", []) or []))))
         except Exception as error:
             # The error text may contain the URL, never the headers.
-            lines.append("{}: {}".format(d["lookup"], d["failed"].format(type(error).__name__)))
+            lines.append("{}: {}".format(d["lookup"], d["failed"].format(
+                getattr(error, "code", None) or type(error).__name__)))
 
     summary = project_costs.summary_path(env)
     age = cache.age(summary)
@@ -318,8 +324,9 @@ def main(argv):
         if cfg.get("live_lookup"):
             limit = cfg.get("cache_seconds", 300)
             path = cache.default_path()
-            if cache.is_stale(path, limit):
-                refresh.run_once(path, sources.read_token())
+            if (cache.is_stale(path, limit) and not cache.pause_after_failure(path, limit)) \
+                    or cache.is_stale(cache.plan_path(), refresh.PLAN_EVERY):
+                refresh.run_once(path, sources.read_token(), plan_path=cache.plan_path())
         refresh.collect_if_due(cfg)
         return 0
     if "--demo" in argv:

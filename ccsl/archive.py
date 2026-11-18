@@ -147,18 +147,22 @@ class Signals:
         self.cwd, self.paths, self.commands = {}, {}, {}
         self.roots = {}
 
-    def _note_root(self, p):
-        if self.ctx is None or p in self.roots:
+    def _note_root(self, key, full):
+        """Remember the repository of a signal, found from the FULL path.
+
+        Keys are shortened to keep the archive small; the repository has to
+        be looked up before that, or a deep repository would be cut off.
+        """
+        if self.ctx is None or self.roots.get(key):
             return
-        root = self.ctx.git_root(p)
-        self.roots[p] = root
+        self.roots[key] = self.ctx.git_root(full)
 
     def add_cwd(self, cwd, weight):
         p = normalize(cwd)
         if not p or is_temp(p, self.temps):
             return
         self.cwd[p] = self.cwd.get(p, 0) + weight
-        self._note_root(p)
+        self._note_root(p, p)
 
     def add_file(self, path, weight):
         p = normalize(path)
@@ -167,7 +171,7 @@ class Signals:
         short = shorten_file(p)
         if short:
             self.paths[short] = self.paths.get(short, 0) + weight
-            self._note_root(short)
+            self._note_root(short, p.rsplit("/", 1)[0])
 
     def add_command(self, command, weight):
         for raw in paths_in_command(command):
@@ -182,11 +186,10 @@ class Signals:
             # folder, inside a repository, or covered by a rule or root.
             keep = short == self.home or short.startswith(self.home + "/")
             if not keep and self.ctx is not None:
-                keep = bool(self.ctx.git_root(short)) or \
-                    self.ctx.classify(short)[1] != "neutral"
+                keep = bool(self.ctx.git_root(p)) or self.ctx.classify(p)[1] != "neutral"
             if keep:
                 self.commands[short] = self.commands.get(short, 0) + weight
-                self._note_root(short)
+                self._note_root(short, p)
 
     def git_roots(self):
         return {p: r for p, r in self.roots.items() if r}

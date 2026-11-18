@@ -192,7 +192,7 @@ def run(env=None, records=None, cfg=None, scan=True):
     if days is None or days < 90:
         issues.append("short_log_retention")
 
-    plan = sources.plan_from_cache(cache.read(cache.default_path(env), cache.MAX_AGE) or {})
+    plan = sources.plan_from_cache(cache.read_plan(env))
     if not plan:
         plan = sources.read_plan()
 

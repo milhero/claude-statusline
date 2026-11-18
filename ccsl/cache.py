@@ -29,11 +29,14 @@ def failure_path(path=None):
     return p.with_name(p.name + ".failed")
 
 
-def remember_failure(path):
-    """Note a failed lookup. A failure here has no consequences."""
+def remember_failure(path, wait=None):
+    """Note a failed lookup, optionally with how long to stay away.
+
+    A failure here has no consequences.
+    """
     try:
         failure_path(path).parent.mkdir(parents=True, exist_ok=True)
-        failure_path(path).write_text("", encoding="utf-8")
+        failure_path(path).write_text(str(int(wait)) if wait else "", encoding="utf-8")
     except Exception:
         pass
 
@@ -46,13 +49,24 @@ def forget_failure(path):
 
 
 def pause_after_failure(path, seconds):
-    """True while a failed lookup is younger than the given span.
+    """True while a failed lookup is younger than its pause.
 
     Without this pause the cache would stay old and every redraw would start
-    the next attempt right away.
+    the next attempt right away. A server that asked for a longer break
+    (rate limit) gets it.
     """
     a = age(failure_path(path))
-    return a is not None and a < seconds
+    if a is None:
+        return False
+    try:
+        asked = int(failure_path(path).read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        asked = 0
+    return a < max(seconds, asked)
+
+
+def plan_path(env=None):
+    return paths.data_file("plan.json", env)
 
 
 def age(path):
@@ -86,3 +100,20 @@ def write(path, data):
         paths.write_atomic(path, json.dumps(data, ensure_ascii=False))
     except Exception:
         pass
+
+
+PLAN_MAX_AGE = 7 * 86400
+
+
+def read_plan(env=None):
+    """The stored plan answer. Unlike usage it stays good for a week."""
+    path = plan_path(env)
+    a = age(path)
+    if a is None or a > PLAN_MAX_AGE:
+        return {}
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+

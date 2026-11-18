@@ -43,20 +43,25 @@ class TestSignals(Sandbox):
     def read(self, lines):
         return archive.read_session(self.log("p", "s", lines), rules.Context([]))
 
-    def test_files_keep_only_their_folder(self):
+    def test_files_keep_only_their_folder_and_the_repository_is_found_first(self):
         repo = self.repo("code", "aurora")
-        s = self.read([answer(out=7, file_path=repo + "/src/app.py"), cost(1, 1)])
-        self.assertEqual(s["paths"], {repo + "/src": 7})
-        self.assertEqual(s["git_roots"][repo + "/src"], repo)
+        s = self.read([answer(out=7, file_path=repo + "/src/deep/er/still/app.py"), cost(1, 1)])
+        (key, weight), = s["paths"].items()
+        self.assertEqual(weight, 7)
+        self.assertNotIn("app.py", key)
+        # However deep the sandbox lies, the repository was found before the
+        # key got shortened.
+        self.assertEqual(s["git_roots"][key], repo)
 
     def test_windows_file_paths_count(self):
         s = self.read([answer(out=5, file_path="C:\\Users\\ana\\proj\\main.py"), cost(1, 1)])
         self.assertEqual(s["paths"], {"C:/Users/ana/proj": 5})
 
-    def test_macos_paths_in_commands_count(self):
+    def test_paths_in_commands_count_with_their_repository(self):
         repo = self.repo("Users", "ana", "code", "aurora")
         s = self.read([answer(out=3, command="cd {} && make".format(repo)), cost(1, 1)])
-        self.assertIn(repo, s["commands"])
+        (key, weight), = s["commands"].items()
+        self.assertEqual((weight, s["git_roots"][key]), (3, repo))
 
     def test_system_paths_in_commands_are_dropped(self):
         s = self.read([answer(out=3, command="/usr/bin/env python3 /etc/hosts"), cost(1, 1)])

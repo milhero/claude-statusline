@@ -9,7 +9,9 @@ from pathlib import Path
 from unittest import mock
 
 
-SAFE_TEMPS = ("/proc", "/sys", "/dev", "/run", "/var/folders", "/private/var/folders")
+# /var/folders is macOS's temp folder and holds the sandbox there, so it is
+# left out like /tmp; the real list is tested on its own.
+SAFE_TEMPS = ("/proc", "/sys", "/dev", "/run")
 
 
 class Sandbox(unittest.TestCase):
@@ -20,7 +22,7 @@ class Sandbox(unittest.TestCase):
         self.addCleanup(shutil.rmtree, str(self.root), True)
         # The sandbox lives in the system temp folder, which the tracker
         # treats as scratch space that never belongs to a project. Inside the
-        # sandbox that rule is switched off; /proc and the macOS folders stay.
+        # sandbox that rule is switched off; /proc and friends stay.
         temps = mock.patch("ccsl.rules.temp_dirs", lambda env=None: SAFE_TEMPS)
         temps.start()
         self.addCleanup(temps.stop)

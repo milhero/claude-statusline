@@ -66,7 +66,6 @@ class TestClassify(Sandbox):
         ctx = self.ctx(roots=[str(self.home)])
         self.assertEqual(ctx.classify(str(self.home)), (None, "neutral"))
         self.assertEqual(ctx.classify("/proc/self/x"), (None, "neutral"))
-        self.assertEqual(ctx.classify("/private/var/folders/x/y"), (None, "neutral"))
 
     def test_dotfiles_repository_in_home_does_not_swallow_everything(self):
         (self.home / ".git").mkdir(parents=True)
@@ -144,9 +143,12 @@ class TestLoadSave(Sandbox):
 
 
 class TestTemp(unittest.TestCase):
-    def test_system_temp_dir_is_recognised(self):
+    def test_system_temp_dirs_are_recognised(self):
         import tempfile
         self.assertTrue(rules.is_temp(os.path.join(tempfile.gettempdir(), "x")))
+        self.assertTrue(rules.is_temp("/private/var/folders/ab/T/x"))
+        self.assertTrue(rules.is_temp("/tmp/build"))
+        self.assertFalse(rules.is_temp("/home/ana/tmp-notes"))
 
 
 if __name__ == "__main__":

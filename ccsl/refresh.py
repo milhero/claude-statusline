@@ -20,7 +20,25 @@ from . import cache, locks, paths, sources
 COLLECT_EVERY = 6 * 3600
 
 
-def run_once(cache_path, token, fetch=None, timeout=10, fetch_profile=None):
+# How long to stay away after the server said "too many requests" without
+# naming a time.
+RATE_LIMIT_PAUSE = 300
+# The plan changes rarely; asking once an hour is plenty.
+PLAN_EVERY = 3600
+
+
+def _wait_from(error):
+    """Seconds a rate-limited answer asks to wait, or None for other errors."""
+    if getattr(error, "code", None) != 429:
+        return None
+    try:
+        return max(RATE_LIMIT_PAUSE, int(error.headers.get("Retry-After") or 0))
+    except (AttributeError, TypeError, ValueError):
+        return RATE_LIMIT_PAUSE
+
+
+def run_once(cache_path, token, fetch=None, timeout=10, fetch_profile=None,
+             plan_path=None):
     """Look up once and write the cache. Always returns 0.
 
     The token is passed in explicitly and never read here. Otherwise None
@@ -31,8 +49,8 @@ def run_once(cache_path, token, fetch=None, timeout=10, fetch_profile=None):
     usage lookup is the real one. Whoever injects `fetch` gets no hidden
     network call for the plan.
 
-    If only the plan lookup fails, the last known plan stays and the usage
-    is written anyway.
+    Usage and plan are separate lookups with separate files: one failing
+    leaves the other untouched.
     """
     if not token:
         return 0
@@ -42,24 +60,23 @@ def run_once(cache_path, token, fetch=None, timeout=10, fetch_profile=None):
         return 0
 
     try:
-        lookup = fetch or sources.fetch_usage
-        data = sources.reduce_usage(lookup(token, timeout=timeout))
+        try:
+            lookup = fetch or sources.fetch_usage
+            cache.write(cache_path, sources.reduce_usage(lookup(token, timeout=timeout)))
+            cache.forget_failure(cache_path)
+        except Exception as error:
+            cache.remember_failure(cache_path, _wait_from(error))
+
         if fetch_profile is None and fetch is None:
             fetch_profile = sources.fetch_profile
-        plan = None
-        if fetch_profile is not None:
+        plan_file = plan_path or cache_path.with_name("plan.json")
+        if fetch_profile is not None and cache.is_stale(plan_file, PLAN_EVERY):
             try:
                 plan = sources.reduce_profile(fetch_profile(token, timeout=timeout))
+                if plan:
+                    cache.write(plan_file, {"plan": plan})
             except Exception:
-                plan = None
-        if plan is None:
-            plan = (cache.read(cache_path, cache.MAX_AGE) or {}).get("plan")
-        if plan:
-            data["plan"] = plan
-        cache.write(cache_path, data)
-        cache.forget_failure(cache_path)
-    except Exception:
-        cache.remember_failure(cache_path)
+                pass
     finally:
         locks.release(handle)
     return 0
