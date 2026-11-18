@@ -46,6 +46,14 @@ class TestInstaller(Sandbox):
         self.uninstall()
         self.assertEqual(self.settings()["statusLine"], foreign)
 
+    def test_padding_and_refresh_interval_are_kept(self):
+        paths.settings_file().write_text(json.dumps({"statusLine": {
+            "type": "command", "command": "x", "padding": 2, "refreshInterval": 30}}),
+            encoding="utf-8")
+        self.install(force=True)
+        line = self.settings()["statusLine"]
+        self.assertEqual((line["padding"], line["refreshInterval"]), (2, 30))
+
     def test_dry_run_changes_nothing(self):
         with mock.patch.object(installer, "bin_dir", lambda: self.home / ".local" / "bin"):
             plan, _ = installer.install(ROOT, choices={"theme": "traffic"})

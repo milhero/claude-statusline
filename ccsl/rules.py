@@ -242,7 +242,8 @@ class Context:
         return git_root(p, self.git_cache)
 
     def _from_roots(self, path):
-        best, length = None, -1
+        """(project name, project folder) from the project roots, or (None, None)."""
+        best, folder, length = None, None, -1
         for root in self.roots:
             if not path.startswith(root + "/") or len(root) <= length:
                 continue
@@ -252,24 +253,18 @@ class Context:
             # ~/worktrees/x must not turn into a project called "worktrees".
             if not rest or rest.startswith(".") or root + "/" + rest in self.roots:
                 continue
+            full = root + "/" + rest
             if self.check_exists:
-                full = root + "/" + rest
                 if full not in self.exists_cache:
                     self.exists_cache[full] = os.path.isdir(full)
                 if not self.exists_cache[full]:
                     # A mistyped path would otherwise become a project of its own.
                     continue
-            best, length = rest, len(root)
-        return best
+            best, folder, length = rest, full, len(root)
+        return best, folder
 
-    def classify(self, path):
-        """(project, rank) for a path."""
-        if not path:
-            return None, "neutral"
-        p = normalize(path)
-        if p in self.neutral or is_temp(p, self.temps):
-            return None, "neutral"
-
+    def _by_rules(self, p):
+        """(project, rank, matched) from the explicit rules."""
         name, rank, length = None, "neutral", -1
         for rule in self.rules:
             prefix = rule.get("prefix")
@@ -282,18 +277,37 @@ class Context:
                 name, rank, length = None, "neutral", len(prefix)
             else:
                 name, rank, length = project, r, len(prefix)
-        if length >= 0:
+        return name, rank, length >= 0
+
+    def classify(self, path):
+        """(project, rank) for a path."""
+        if not path:
+            return None, "neutral"
+        p = normalize(path)
+        if p in self.neutral or is_temp(p, self.temps):
+            return None, "neutral"
+
+        name, rank, matched = self._by_rules(p)
+        if matched:
             return name, rank
 
         root = self.git_root(p)
         # A dotfiles repository in the home folder would otherwise swallow
         # every path below it.
-        if root and root not in self.neutral:
+        if root in self.neutral:
+            root = None
+        found, folder = self._from_roots(p)
+        # A repository nested inside a project folder (project/app/.git) is a
+        # part of that project, not a project of its own. A worktree whose
+        # main repository lives elsewhere is not nested and keeps its repo.
+        if found and (root is None or root.startswith(folder + "/")):
+            root = folder
+        if root:
+            # Rules written for a repository apply to its worktrees too.
+            name, rank, matched = self._by_rules(root)
+            if matched:
+                return name, rank
             return root.rsplit("/", 1)[-1], "project"
-
-        found = self._from_roots(p)
-        if found:
-            return found, "project"
         return None, "neutral"
 
 

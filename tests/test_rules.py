@@ -93,6 +93,25 @@ class TestClassify(Sandbox):
         ctx = self.ctx(roots=[str(top), str(top / "trees")])
         self.assertIsNone(ctx.classify(str(top / "trees" / "deleted" / "x"))[0])
 
+    def test_a_rule_on_the_main_repository_covers_its_worktrees(self):
+        main = self.repo("code", "engine")
+        tree = self.repo("code", "engine-feature", worktree_of=main)
+        ctx = self.ctx([{"prefix": main, "project": "Engine", "rank": "project"}])
+        self.assertEqual(ctx.classify(tree + "/src")[0], "Engine")
+
+    def test_nested_repository_belongs_to_the_project_folder_with_roots(self):
+        top = self.root / "projects"
+        (top / "manager").mkdir(parents=True)
+        nested = self.repo("projects", "manager", "app")
+        self.assertEqual(self.ctx(roots=[str(top)]).classify(nested + "/x")[0], "manager")
+        self.assertEqual(self.ctx().classify(nested + "/x")[0], "app")
+
+    def test_worktree_elsewhere_keeps_its_main_repository_with_roots(self):
+        main = self.repo("code", "aurora")
+        trees = self.root / "trees"
+        tree = self.repo("trees", "aurora-x", worktree_of=main)
+        self.assertEqual(self.ctx(roots=[str(trees)]).classify(tree)[0], "aurora")
+
     def test_known_roots_outlive_deleted_repositories(self):
         ctx = rules.Context([], known_roots={"/gone/repo/src": "/gone/repo"})
         self.assertEqual(ctx.classify("/gone/repo/src")[0], "repo")

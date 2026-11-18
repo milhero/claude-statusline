@@ -244,8 +244,15 @@ def install(code_dir, python=None, mode="repo", force=False, commands=True,
         def write_statusline():
             data = read_settings(settings)
             saved = backup(settings)
-            data["statusLine"] = {"type": "command", "command": statusline_command(python, env),
-                                  "padding": 0, "refreshInterval": 60}
+            entry = {"type": "command", "command": statusline_command(python, env),
+                     "padding": 0, "refreshInterval": 60}
+            # Spacing and redraw interval are the user's choice; keep them.
+            before = data.get("statusLine")
+            if isinstance(before, dict):
+                for key in ("padding", "refreshInterval"):
+                    if isinstance(before.get(key), int) and not isinstance(before.get(key), bool):
+                        entry[key] = before[key]
+            data["statusLine"] = entry
             write_settings(settings, data)
             return "Status line set in {}{}".format(
                 settings, " (backup: {})".format(saved.name) if saved else "")

@@ -406,6 +406,10 @@ def should_replace(old, new):
     not lose lines. Among estimated ones the token mass decides, because the
     archived record already carries dollars and the fresh one does not yet.
     """
+    # An imported record (from an earlier version or another tool) gives way
+    # as soon as its log can be read again: the log is the original.
+    if old.get("imported") and not new.get("imported"):
+        return True
     old_est, new_est = bool(old.get("estimated")), bool(new.get("estimated"))
     if old_est != new_est:
         return old_est
