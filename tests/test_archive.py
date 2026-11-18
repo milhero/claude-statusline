@@ -92,7 +92,8 @@ class TestSubagents(Sandbox):
         sub.write_text(json.dumps(answer(out=9, file_path=repo + "/src/a.py", request="r2"))
                        + "\n", encoding="utf-8")
         s = archive.read_session(main, rules.Context([]))
-        self.assertIn(repo + "/src", s["paths"])
+        # Keys may be shortened on deep temp folders; the repository is not.
+        self.assertIn(repo, [s["git_roots"].get(k) for k in s["paths"]])
         self.assertEqual(s["models"]["claude-opus-5"]["out"], 2 + 9 + 4)
 
     def test_a_changed_subagent_log_triggers_a_new_read(self):
@@ -104,7 +105,8 @@ class TestSubagents(Sandbox):
         sub.write_text(json.dumps(answer(out=5, file_path=repo + "/x.py")) + "\n",
                        encoding="utf-8")
         archive.collect(ctx=rules.Context([]))
-        self.assertIn(repo, archive.read()[0]["paths"])
+        stored = archive.read()[0]
+        self.assertIn(repo, [stored["git_roots"].get(k) for k in stored["paths"]])
 
 
 class TestSettle(unittest.TestCase):
