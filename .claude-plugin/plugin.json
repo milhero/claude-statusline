@@ -1,0 +1,21 @@
+{
+  "name": "calm-statusline",
+  "displayName": "Calm Statusline",
+  "version": "1.0.0",
+  "description": "A calm status line for Claude Code: weekly, model and five-hour limits, context and cost per project, always visible.",
+  "author": {
+    "name": "milhero",
+    "url": "https://github.com/milhero"
+  },
+  "homepage": "https://github.com/milhero/claude-statusline",
+  "repository": "https://github.com/milhero/claude-statusline",
+  "license": "GPL-3.0-only",
+  "keywords": [
+    "statusline",
+    "usage",
+    "limits",
+    "cost",
+    "subscription"
+  ],
+  "icon": ".claude-plugin/icon.png"
+}

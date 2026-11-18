@@ -1,0 +1,15 @@
+{
+  "name": "milhero",
+  "description": "Plugins by milhero for Claude Code.",
+  "owner": {
+    "name": "milhero",
+    "url": "https://github.com/milhero"
+  },
+  "plugins": [
+    {
+      "name": "calm-statusline",
+      "source": "./",
+      "description": "A calm status line for Claude Code: limits, context and cost per project."
+    }
+  ]
+}
