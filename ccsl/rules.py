@@ -228,6 +228,7 @@ class Context:
         self.neutral = {normalize(n) for n in (neutral if neutral is not None
                                                else neutral_exact(env))}
         self.temps = temp_dirs(env)
+        self.claude_projects = normalize(str(paths.claude_dir(env))) + "/projects"
         self.check_exists = check_exists
         self.git_cache = {}
         self.exists_cache = {}
@@ -263,6 +264,11 @@ class Context:
             best, folder, length = rest, full, len(root)
         return best, folder
 
+    def _is_memory(self, p):
+        parts = p[len(self.claude_projects) + 1:].split("/") \
+            if p.startswith(self.claude_projects + "/") else []
+        return len(parts) >= 2 and parts[1] == "memory"
+
     def _by_rules(self, p):
         """(project, rank, matched) from the explicit rules."""
         name, rank, length = None, "neutral", -1
@@ -279,8 +285,13 @@ class Context:
                 name, rank, length = project, r, len(prefix)
         return name, rank, length >= 0
 
-    def classify(self, path):
-        """(project, rank) for a path."""
+    def classify(self, path, use_roots=True):
+        """(project, rank) for a path.
+
+        use_roots=False leaves the project roots out. Paths in shell commands
+        use that: `ls ~/backups` says nothing about a project, a command in a
+        repository does.
+        """
         if not path:
             return None, "neutral"
         p = normalize(path)
@@ -289,6 +300,10 @@ class Context:
 
         name, rank, matched = self._by_rules(p)
         if matched:
+            if rank == "neutral" and self._is_memory(p):
+                # Notes Claude keeps per project are real work, but across
+                # projects: they count when nothing else was touched.
+                return CLAUDE_CONFIG, "secondary"
             return name, rank
 
         root = self.git_root(p)
@@ -296,7 +311,7 @@ class Context:
         # every path below it.
         if root in self.neutral:
             root = None
-        found, folder = self._from_roots(p)
+        found, folder = self._from_roots(p) if use_roots else (None, None)
         # A repository nested inside a project folder (project/app/.git) is a
         # part of that project, not a project of its own. A worktree whose
         # main repository lives elsewhere is not nested and keeps its repo.

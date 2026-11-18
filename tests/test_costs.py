@@ -94,12 +94,26 @@ class TestBackfill(Sandbox):
             calls.append(1)
             return {date(2026, 1, 5): {"a": float(len(calls))}}, {"until": "2026-02-01"}
         args = ([], None, [], date(2026, 2, 1), [], {}, {})
-        first, meta = backfill.get(*args, compute_fn=compute)
-        again, _ = backfill.get(*args, compute_fn=compute)
+        first, meta = backfill.get(*args, compute_fn=compute, min_days=0)
+        again, _ = backfill.get(*args, compute_fn=compute, min_days=0)
         self.assertEqual(first, again)
         self.assertIn("created", meta)
-        new, _ = backfill.get(*args, refreeze=True, compute_fn=compute)
+        new, _ = backfill.get(*args, refreeze=True, compute_fn=compute, min_days=0)
         self.assertEqual(new[date(2026, 1, 5)]["a"], 2.0)
+
+    def test_provisional_until_a_week_is_measured(self):
+        calls = []
+
+        def compute(*args):
+            calls.append(1)
+            return {}, {"until": "2026-02-01"}
+        records = [{"start_ms": 1769900000000 + i * 86400000, "usd": 1} for i in range(3)]
+        args = (records, None, [], date(2026, 2, 1), [], {}, {})
+        _, meta = backfill.get(*args, compute_fn=compute)
+        self.assertTrue(meta["provisional"])
+        backfill.get(*args, compute_fn=compute)
+        self.assertEqual(len(calls), 2)          # not frozen yet, computed again
+        self.assertFalse(backfill.frozen_path().exists())
 
     def test_first_use_from_history_or_invoices(self):
         (self.claude / "history.jsonl").write_text(

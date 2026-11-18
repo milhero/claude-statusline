@@ -40,7 +40,7 @@ def session_shares(record, ctx):
         for place, weight in source.items():
             if not isinstance(weight, (int, float)) or weight <= 0:
                 continue
-            name, rank = ctx.classify(place)
+            name, rank = ctx.classify(place, use_roots=(field != "commands"))
             if rank == "project" and name:
                 main[name] += weight
             elif rank == "secondary" and name:

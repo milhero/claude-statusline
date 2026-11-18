@@ -285,9 +285,20 @@ def load_frozen(path):
     return days, meta
 
 
+# The rate per line comes from the measured time. With only a day or two
+# measured, one unusual day would shape the past for good; until there is a
+# week of measurements the estimate stays provisional and is recomputed.
+MIN_MEASURED_DAYS = 7
+
+
+def measured_days(records):
+    return len({attribution.day_of(r.get("start_ms")) for r in records or []
+                if not r.get("estimated") and attribution.day_of(r.get("start_ms"))})
+
+
 def get(records, ctx, user_rules, archive_start, invoices, rates, cfg, path=None,
-        refreeze=False, compute_fn=None):
-    """The frozen backfill, computed the first time.
+        refreeze=False, compute_fn=None, min_days=MIN_MEASURED_DAYS):
+    """The frozen backfill, computed the first time there is enough to go on.
 
     Once written it stays: new measurements no longer change the past.
     """
@@ -298,8 +309,10 @@ def get(records, ctx, user_rules, archive_start, invoices, rates, cfg, path=None
             return days, meta
     fn = compute_fn or compute
     days, meta = fn(records, ctx, user_rules, archive_start, invoices, rates, cfg)
-    meta = dict(meta, created=datetime.now(timezone.utc).astimezone().isoformat(
-        timespec="seconds"))
+    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    if measured_days(records) < min_days:
+        return days, dict(meta, provisional=True, created=now)
+    meta = dict(meta, created=now)
     try:
         save_frozen(target, days, meta)
     except OSError:

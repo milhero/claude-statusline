@@ -118,6 +118,16 @@ def _remember_process(processes, line):
         processes[key] = line
 
 
+def _lines(files):
+    for name in files:
+        try:
+            with Path(name).open(encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    yield line
+        except OSError:
+            continue
+
+
 def _sum_models(lines):
     models = {}
     for line in lines:
@@ -195,8 +205,25 @@ class Signals:
         return {p: r for p, r in self.roots.items() if r}
 
 
-def read_session(file, ctx=None):
-    """Condense one session file. None if it has neither cost nor tokens."""
+def subagent_logs(file):
+    """Transcripts of the subagents a session started.
+
+    Claude Code keeps them next to the session's log, in
+    <session id>/subagents/. Their cost is already in the session's cost line
+    (they run in the same process), but where they worked is only in here.
+    """
+    folder = Path(file).with_suffix("") / "subagents"
+    try:
+        return sorted(folder.glob("*.jsonl"))
+    except OSError:
+        return []
+
+
+def read_session(file, ctx=None, extra=None):
+    """Condense one session file (and its subagents' logs).
+
+    None if there is neither cost nor tokens.
+    """
     processes = {}
     session_id = None
     first_ms = None
@@ -207,60 +234,59 @@ def read_session(file, ctx=None):
     # times; on real data that was a factor of 2.5.
     counted_requests = set()
 
-    with Path(file).open(encoding="utf-8", errors="replace") as f:
-        for line in f:
-            record = None
-            if "cost-state" in line:
-                # The word alone is not enough: a session talking about the
-                # tracker mentions it in ordinary messages.
-                try:
-                    record = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(record, dict) and record.get("type") == "cost-state":
-                    _remember_process(processes, record)
-                    session_id = session_id or record.get("sessionId")
-                    continue
-            # A rough pre-filter so not every line gets parsed. It may only
-            # sieve out; the parsed object decides below.
-            if "assistant" not in line:
+    for line in _lines([file] + list(extra if extra is not None else subagent_logs(file))):
+        record = None
+        if "cost-state" in line:
+            # The word alone is not enough: a session talking about the
+            # tracker mentions it in ordinary messages.
+            try:
+                record = json.loads(line)
+            except ValueError:
                 continue
-            if record is None:
-                try:
-                    record = json.loads(line)
-                except ValueError:
-                    continue
-            if not isinstance(record, dict) or record.get("type") != "assistant":
+            if isinstance(record, dict) and record.get("type") == "cost-state":
+                _remember_process(processes, record)
+                session_id = session_id or record.get("sessionId")
                 continue
-            if first_ms is None:
-                first_ms = _time_ms(record.get("timestamp"))
-            message = record.get("message") or {}
-            usage = message.get("usage") or {}
-            out = usage.get("output_tokens") or 0
-
-            request = record.get("requestId")
-            already = bool(request) and request in counted_requests
-            if request:
-                counted_requests.add(request)
-
-            model = message.get("model")
-            if model and usage and not already:
-                entry = tokens.setdefault(model, {})
-                for field, source in (("in", "input_tokens"), ("out", "output_tokens"),
-                                      ("cache_read", "cache_read_input_tokens"),
-                                      ("cache_write", "cache_creation_input_tokens")):
-                    entry[field] = (entry.get(field) or 0) + (usage.get(source) or 0)
-
-            if not out:
+        # A rough pre-filter so not every line gets parsed. It may only
+        # sieve out; the parsed object decides below.
+        if "assistant" not in line:
+            continue
+        if record is None:
+            try:
+                record = json.loads(line)
+            except ValueError:
                 continue
-            if record.get("cwd"):
-                signals.add_cwd(record["cwd"], out)
-            for raw in PATH_FIELD.findall(line):
-                signals.add_file(unescape(raw), out)
-            # Where the shell worked. For sessions that do everything through
-            # commands this is often the only signal.
-            for command in COMMAND_FIELD.findall(line):
-                signals.add_command(unescape(command), out)
+        if not isinstance(record, dict) or record.get("type") != "assistant":
+            continue
+        if first_ms is None:
+            first_ms = _time_ms(record.get("timestamp"))
+        message = record.get("message") or {}
+        usage = message.get("usage") or {}
+        out = usage.get("output_tokens") or 0
+
+        request = record.get("requestId")
+        already = bool(request) and request in counted_requests
+        if request:
+            counted_requests.add(request)
+
+        model = message.get("model")
+        if model and usage and not already:
+            entry = tokens.setdefault(model, {})
+            for field, source in (("in", "input_tokens"), ("out", "output_tokens"),
+                                  ("cache_read", "cache_read_input_tokens"),
+                                  ("cache_write", "cache_creation_input_tokens")):
+                entry[field] = (entry.get(field) or 0) + (usage.get(source) or 0)
+
+        if not out:
+            continue
+        if record.get("cwd"):
+            signals.add_cwd(record["cwd"], out)
+        for raw in PATH_FIELD.findall(line):
+            signals.add_file(unescape(raw), out)
+        # Where the shell worked. For sessions that do everything through
+        # commands this is often the only signal.
+        for command in COMMAND_FIELD.findall(line):
+            signals.add_command(unescape(command), out)
 
     measured = bool(processes)
     if not measured and not tokens:
@@ -401,6 +427,9 @@ def _token_mass(record):
                if isinstance(v, dict))
 
 
+SIGNAL_KEYS = ("cwd", "paths", "commands", "git_roots")
+
+
 def should_replace(old, new):
     """True if the freshly read state should replace the archived one.
 
@@ -417,7 +446,9 @@ def should_replace(old, new):
     if old_est != new_est:
         return old_est
     if not new_est:
-        return new.get("processes") != old.get("processes")
+        # The log does not lose lines: whatever it says now is right, also
+        # when only the signals changed (a subagent's log grew, say).
+        return any(new.get(k) != old.get(k) for k in SIGNAL_KEYS + ("processes", "models"))
     return _token_mass(new) > _token_mass(old)
 
 
@@ -477,12 +508,19 @@ def collect(source=None, target=None, ctx=None, state=None, full=False):
                     st = file.stat()
                 except OSError:
                     continue
+                extra = subagent_logs(file)
                 mark = [int(st.st_mtime), st.st_size]
+                for sub in extra:
+                    try:
+                        sub_st = sub.stat()
+                    except OSError:
+                        continue
+                    mark = [max(mark[0], int(sub_st.st_mtime)), mark[1] + sub_st.st_size]
                 now_seen[str(file)] = mark
                 if seen.get(str(file)) == mark:
                     continue
                 try:
-                    record = read_session(file, ctx)
+                    record = read_session(file, ctx, extra)
                 except Exception:
                     skipped += 1
                     continue

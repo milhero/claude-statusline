@@ -106,13 +106,13 @@ def from_transcript(transcript, ctx):
             return None
         done = block
 
-        candidates = [unescape(p) for p in PATH_FIELD.findall(text)]
+        candidates = [(unescape(p), True) for p in PATH_FIELD.findall(text)]
         for command in COMMAND_FIELD.findall(text):
-            candidates += paths_in_command(unescape(command))
+            candidates += [(p, False) for p in paths_in_command(unescape(command))]
 
         counts = {}
-        for hit in candidates:
-            name, rank = ctx.classify(hit)
+        for hit, use_roots in candidates:
+            name, rank = ctx.classify(hit, use_roots=use_roots)
             # Only rank project: secondary would turn note-taking into the
             # session's project.
             if rank == "project" and name:

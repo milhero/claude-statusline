@@ -278,8 +278,10 @@ def by_source(result, color=False, lang="en"):
                                usd=_money(recomputed, "USD", lang)), color))
         lines.append("")
     measure, unit = _measure(result, lang)
-    created = (result.get("backfill") or {}).get("created")
-    since = i18n.t("src_since", lang, date=_date(str(created)[:10], lang)) if created else ""
+    meta = result.get("backfill") or {}
+    created = meta.get("created")
+    since = i18n.t("src_since", lang, date=_date(str(created)[:10], lang)) \
+        if created and not meta.get("provisional") else ""
     for line in i18n.t("src_text", lang, measure=measure, unit=unit, since=since).split("\n"):
         lines.append(_q(line, color))
     return "\n".join(lines)

@@ -111,6 +111,22 @@ class TestClassify(Sandbox):
         tree = self.repo("trees", "aurora-x", worktree_of=main)
         self.assertEqual(self.ctx(roots=[str(trees)]).classify(tree)[0], "aurora")
 
+    def test_memory_notes_count_as_secondary_work(self):
+        claude = str(self.claude).replace("\\", "/")
+        self.assertEqual(self.ctx().classify(claude + "/projects/-code-aurora/memory/x.md"),
+                         (rules.CLAUDE_CONFIG, "secondary"))
+        self.assertEqual(self.ctx().classify(claude + "/projects/-code-aurora/abc.jsonl"),
+                         (None, "neutral"))
+
+    def test_command_paths_can_skip_the_roots(self):
+        top = self.root / "home2"
+        (top / "backups").mkdir(parents=True)
+        ctx = self.ctx(roots=[str(top)])
+        self.assertEqual(ctx.classify(str(top / "backups"))[0], "backups")
+        self.assertIsNone(ctx.classify(str(top / "backups"), use_roots=False)[0])
+        repo = self.repo("home2", "app")
+        self.assertEqual(ctx.classify(repo, use_roots=False)[0], "app")
+
     def test_known_roots_outlive_deleted_repositories(self):
         ctx = rules.Context([], known_roots={"/gone/repo/src": "/gone/repo"})
         self.assertEqual(ctx.classify("/gone/repo/src")[0], "repo")

@@ -53,6 +53,10 @@ i18n.add({
                          "claude-costs --refreeze",
                          "Hochrechnung endet am {until}, das Archiv beginnt am {start}: "
                          "claude-costs --refreeze"),
+    "chk_backfill_provisional": ("Backfill provisional until a week is measured; it is "
+                                 "frozen after that",
+                                 "Hochrechnung vorläufig, bis eine Woche gemessen ist; "
+                                 "danach wird sie festgeschrieben"),
     "chk_format_bad": ("{recent} logs from the last 7 days, none with a cost line: Claude "
                        "Code's log format has probably changed, costs are not being "
                        "measured",
@@ -148,7 +152,9 @@ def run(result, invoices=None, records=None, today=None, backfill_meta=None,
                                                    expected=money(expected, "USD"))))
 
     # 6. The frozen backfill matches the start of the archive.
-    if backfill_meta is not None and backfill_meta.get("until"):
+    if backfill_meta is not None and backfill_meta.get("provisional"):
+        findings.append(_finding(True, i18n.t("chk_backfill_provisional", lang)))
+    elif backfill_meta is not None and backfill_meta.get("until"):
         until = backfill_meta.get("until")
         ok = not archive_start or until == archive_start
         findings.append(_finding(ok, i18n.t(

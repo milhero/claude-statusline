@@ -82,6 +82,31 @@ class TestSignals(Sandbox):
         self.assertEqual(signals.commands, {"C:/Users/ana/proj": 2})
 
 
+class TestSubagents(Sandbox):
+    def test_subagent_logs_add_signals_and_tokens(self):
+        repo = self.repo("code", "aurora")
+        main = self.log("p", "s1", [answer(out=4, cwd=str(self.home)),
+                                    answer(out=2, usage={"output_tokens": 2}, request="r1")])
+        sub = main.with_suffix("") / "subagents" / "agent-1.jsonl"
+        sub.parent.mkdir(parents=True)
+        sub.write_text(json.dumps(answer(out=9, file_path=repo + "/src/a.py", request="r2"))
+                       + "\n", encoding="utf-8")
+        s = archive.read_session(main, rules.Context([]))
+        self.assertIn(repo + "/src", s["paths"])
+        self.assertEqual(s["models"]["claude-opus-5"]["out"], 2 + 9 + 4)
+
+    def test_a_changed_subagent_log_triggers_a_new_read(self):
+        main = self.log("p", "s1", [answer(), cost(1.0, 1, session="s1")])
+        archive.collect(ctx=rules.Context([]))
+        sub = main.with_suffix("") / "subagents" / "agent-1.jsonl"
+        sub.parent.mkdir(parents=True)
+        repo = self.repo("code", "late")
+        sub.write_text(json.dumps(answer(out=5, file_path=repo + "/x.py")) + "\n",
+                       encoding="utf-8")
+        archive.collect(ctx=rules.Context([]))
+        self.assertIn(repo, archive.read()[0]["paths"])
+
+
 class TestSettle(unittest.TestCase):
     def test_process_in_two_sessions_counts_once(self):
         a = {"session": "a", "first_ms": 1, "usd": 50, "processes": {"p": 50.0}}
