@@ -57,6 +57,10 @@ i18n.add({
                                  "frozen after that",
                                  "Hochrechnung vorläufig, bis eine Woche gemessen ist; "
                                  "danach wird sie festgeschrieben"),
+    "chk_no_currency": ("Invoices have no currency: add \"currency\" (e.g. \"EUR\") to "
+                        "invoices.json",
+                        "Rechnungen ohne Währung: \"currency\" (etwa \"EUR\") in "
+                        "invoices.json eintragen"),
     "chk_format_bad": ("{recent} logs from the last 7 days, none with a cost line: Claude "
                        "Code's log format has probably changed, costs are not being "
                        "measured",
@@ -104,6 +108,9 @@ def run(result, invoices=None, records=None, today=None, backfill_meta=None,
             abs(assigned + unused - paid) <= 0.05,
             i18n.t("chk_sub", lang, assigned=money(assigned), unused=money(unused),
                    paid=money(paid))))
+
+    if invoices and cur == "?":
+        findings.append(_finding(False, i18n.t("chk_no_currency", lang)))
 
     # 2. The projects add up to the total, for API value and subscription share.
     sum_api = sum(p.get("api_usd") or 0 for p in projects)

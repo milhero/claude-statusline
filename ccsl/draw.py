@@ -129,8 +129,6 @@ CIRCLES = ("○", "◔", "◑", "◕", "●")
 # Column heights: one character carries the whole value
 SPARK = ("▁", "▂", "▃", "▄", "▅", "▆", "▇", "█")
 
-GAUGE_STYLES = ("line", "circle", "block", "spark")
-
 
 def _fraction(percent):
     """Value as a fraction between 0 and 1. Above a hundred percent is capped."""
@@ -193,11 +191,6 @@ def gauge(percent, width, style="line", track=False):
     if style == "block":
         return _block(percent, max(1, width), track)
     return _line(percent, max(1, width), track)
-
-
-def gauge_width(style, width):
-    """The most room a gauge style takes."""
-    return 1 if style in ("circle", "spark") else max(1, width)
 
 
 # Colour families for the plan. Within a family only lightness and saturation

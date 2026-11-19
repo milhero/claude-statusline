@@ -5,6 +5,7 @@ credentials, settings.json and our own data all move with it.
 """
 
 import os
+import stat
 from pathlib import Path
 
 DATA_DIR_NAME = "claude-statusline"
@@ -57,9 +58,26 @@ def ensure_data_dir(env=None):
 
 
 def write_atomic(path, text):
-    """Write via a temporary file and rename, so readers never see half a file."""
+    """Write via a temporary file and rename, so readers never see half a file.
+
+    An existing file keeps its permissions: settings.json may hold secrets in
+    its env block and be readable by its owner only.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp-{}".format(os.getpid()))
     tmp.write_text(text, encoding="utf-8")
-    os.replace(str(tmp), str(path))
+    try:
+        os.chmod(str(tmp), stat.S_IMODE(os.stat(str(path)).st_mode))
+    except OSError:
+        pass
+    try:
+        os.replace(str(tmp), str(path))
+    except OSError:
+        # Windows refuses the rename while another process has the file
+        # open. Leave no temporary file behind; the next run tries again.
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise

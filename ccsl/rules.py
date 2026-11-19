@@ -40,6 +40,10 @@ def normalize(path):
     text = str(path).replace("\\", "/")
     if text == "~" or text.startswith("~/"):
         text = str(paths.home()).replace("\\", "/") + text[1:]
+    if os.name == "nt" and len(text) >= 3 and text[0] == "/" and text[1].isalpha() \
+            and text[2] == "/":
+        # Git Bash spells C:\\Users as /c/Users.
+        text = text[1].upper() + ":" + text[2:]
     if len(text) >= 2 and text[1] == ":" and text[0].isalpha():
         text = text[0].upper() + text[1:]
     if len(text) > 1 and text.endswith("/") and not text.endswith(":/"):
@@ -112,7 +116,7 @@ def load(path=None, env=None):
     """
     target = Path(path) if path else default_path(env)
     try:
-        data = json.loads(target.read_text(encoding="utf-8"))
+        data = json.loads(target.read_text(encoding="utf-8-sig"))
     except Exception:
         return []
     raw = data.get("rules") if isinstance(data, dict) else data

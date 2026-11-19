@@ -13,6 +13,7 @@ Set up claude-statusline for this user. A plugin cannot register a status line b
 3. Ask the user, in one question round, with short options:
    - Layout: `calm-one-line` (default, one line), `calm-two-line` (identity on top, readings below), `expressive` (one row per limit with reset times), `traffic` (dots only).
    - Language: automatic (from the system), English, German.
+   - Terminal command: whether to add `claude-costs` to `~/.local/bin` (pass `--no-command` if not).
    - Cost tracker: on or off. On means: an archive of the session logs is kept (Claude Code deletes them after 30 days), and the line shows the running project's value. Mention that it can be set up in detail afterwards with `/calm-statusline:cost-setup`.
    If the user wants to see the layouts first, run `<python> "${CLAUDE_PLUGIN_ROOT}/statusline.py" --demo` and show the output.
 
@@ -21,4 +22,4 @@ Set up claude-statusline for this user. A plugin cannot register a status line b
 
 5. Report in two or three sentences what changed and that the line appears with the next message. Point to `<python> "${CLAUDE_PLUGIN_ROOT}/statusline.py" --diagnose` for troubleshooting. If the installer warned that `~/.local/bin` is not on PATH, pass that on: it only matters for the `claude-costs` terminal command, `/calm-statusline:costs` works anyway.
 
-To remove it: `<python> "${CLAUDE_PLUGIN_ROOT}/install.py" --uninstall`. The user's data (archive, invoices, rules) stays in the data folder the command names.
+To remove it (for example before uninstalling the plugin): `<python> "${CLAUDE_PLUGIN_ROOT}/install.py" --uninstall`. A status line the user had before comes back. The user's data (archive, invoices, rules) stays in the data folder the command names.

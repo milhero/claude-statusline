@@ -82,6 +82,26 @@ class TestSignals(Sandbox):
         self.assertEqual(signals.commands, {"C:/Users/ana/proj": 2})
 
 
+class TestWorkingDirectoryOnce(Sandbox):
+    def test_the_working_directory_is_not_also_counted_as_a_file(self):
+        repo = self.repo("w", "repo")
+        web = repo + "/apps/web"
+        s = archive.read_session(self.log("p", "s", [answer(out=10, cwd=web), cost(1, 1)]),
+                                 rules.Context([]))
+        self.assertEqual(s["cwd"], {web: 10})
+        self.assertEqual(s["paths"], {})
+
+
+class TestRecovery(Sandbox):
+    def test_a_deleted_archive_is_rebuilt_from_the_logs(self):
+        for i in range(3):
+            self.log("p", "s{}".format(i), [answer(), cost(1.0 + i, i, session="s{}".format(i))])
+        archive.collect(ctx=rules.Context([]))
+        archive.archive_path().unlink()
+        result = archive.collect(ctx=rules.Context([]))
+        self.assertEqual(result["total"], 3)
+
+
 class TestSubagents(Sandbox):
     def test_subagent_logs_add_signals_and_tokens(self):
         repo = self.repo("code", "aurora")

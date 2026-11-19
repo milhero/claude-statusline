@@ -27,7 +27,9 @@ cd claude-statusline
 python3 install.py            # on Windows: py install.py; --dry-run and --help work too
 ```
 
-Both ways write a single key, `statusLine`, into your Claude Code `settings.json` and keep a backup of the file. An existing status line is only replaced with `--force`, and comes back when you uninstall (`python3 install.py --uninstall`).
+Both ways write one key, `statusLine`, into your Claude Code `settings.json` (a backup of the file is kept, its permissions stay) and add a `claude-costs` command to `~/.local/bin` (skip it with `--no-command`). An existing status line is only replaced with `--force`, and comes back when you uninstall.
+
+To remove it, run `python3 install.py --uninstall`, or as a plugin user ask `/calm-statusline:setup` to remove it before `/plugin uninstall calm-statusline@milhero`. Your data (archive, invoices, rules) stays in `~/.claude/claude-statusline/` until you delete that folder.
 
 Needs Python 3.9 or newer, no packages. Works on Linux, macOS and Windows, with Claude Code 2.1.251 or newer.
 
@@ -73,15 +75,17 @@ Model and effort share one colour: Haiku green, Sonnet blue, Opus teal, Fable ma
 | `cache_seconds` | `300` | How often the account lookup refreshes |
 | `live_lookup` | `true` | Turn off to make no network request at all |
 | `xhigh_as_ultracode` | `false` | Label `xhigh` as `ultracode` (cannot be measured, see below) |
+| `project_roots` | `[]` | Folders whose subfolders are projects even without git |
+| `git_author_emails` | `[]` | Your commit addresses, if git's `user.email` does not cover them all |
 | `color` | `auto` | `always` or `never` |
 
-Every key can be overridden per terminal with an environment variable, for example `CCSL_THEME=traffic` or `CCSL_SHOW_COST=1`.
+Every single-value key can be overridden per terminal with an environment variable, for example `CCSL_THEME=traffic` or `CCSL_SHOW_COST=1`.
 
 ## Where the numbers come from
 
 Weekly limit, five-hour window, context, model, effort and session cost come from Claude Code itself, through the status line input.
 
-The model-specific weekly limit is not in there. It comes from an undocumented endpoint on `api.anthropic.com`, called with your existing Claude Code login. So does the plan name, because the one stored at login goes stale after a plan change. Both requests run in a detached background process at most every `cache_seconds`; the line never waits for the network. If they fail, exactly these values are missing and everything else stays. With `"live_lookup": false` nothing goes over the network.
+The model-specific weekly limit is not in there. It comes from an undocumented endpoint on `api.anthropic.com`, called with your existing Claude Code login. So does the plan name, because the one stored at login goes stale after a plan change. Both requests run in a detached background process at most every `cache_seconds` (the plan at most hourly); the line never waits for the network. If the server says it gets too many requests, the lookups pause for as long as it asks, and longer each time it repeats. If they fail, exactly these values are missing and everything else stays. With `"live_lookup": false` nothing goes over the network.
 
 Ultracode cannot be detected from outside: it reports itself as `xhigh`. Labelling it anyway would be a claim, not a measurement, which is why it is a setting.
 

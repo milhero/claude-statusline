@@ -24,7 +24,8 @@ class TestStdin(unittest.TestCase):
         s = sources.from_stdin(data, "de")
         self.assertEqual((s.week.label, s.week.percent), ("Woche", 91))
         self.assertEqual(s.context.percent, 14)
-        self.assertEqual((s.model, s.effort, s.branch), ("Opus 5", "high", "main"))
+        self.assertEqual((s.model, s.effort), ("Opus 5", "high"))
+        self.assertIsNone(s.branch)           # the sample folder is no repository
         self.assertAlmostEqual(s.cost_usd, 2.41)
 
     def test_anything_goes(self):
@@ -62,6 +63,23 @@ class TestPlan(Sandbox):
                 mock.patch.object(sources.subprocess, "run", return_value=answer):
             self.assertEqual(sources.read_token(), "sk-key")
             self.assertEqual(sources.credentials_source(), "keychain")
+
+
+class TestBranch(Sandbox):
+    def test_branch_from_head_worktree_and_detached(self):
+        repo = self.repo("code", "aurora")
+        (self.root / "code" / "aurora" / ".git" / "HEAD").write_text(
+            "ref: refs/heads/feature/x\n", encoding="utf-8")
+        (self.root / "code" / "aurora" / "src").mkdir()
+        self.assertEqual(sources.git_branch(repo + "/src"), "feature/x")
+        gitdir = self.root / "code" / "aurora" / ".git" / "worktrees" / "fix"
+        gitdir.mkdir(parents=True)
+        (gitdir / "HEAD").write_text("0123456789abcdef\n", encoding="utf-8")
+        tree = self.root / "trees" / "fix"
+        tree.mkdir(parents=True)
+        (tree / ".git").write_text("gitdir: {}\n".format(gitdir), encoding="utf-8")
+        self.assertEqual(sources.git_branch(str(tree)), "0123456")
+        self.assertIsNone(sources.git_branch(str(self.home)))
 
 
 class TestUsage(unittest.TestCase):
@@ -122,6 +140,36 @@ class TestCacheAndRefresh(Sandbox):
         for _ in range(3):
             refresh.run_once(cache.default_path(), "t", fetch=usage, fetch_profile=profile)
         self.assertEqual(len(calls), 1)
+
+    def test_a_pause_holds_for_every_redraw_and_grows(self):
+        import urllib.error
+        target = cache.default_path()
+        calls = {"usage": 0, "profile": 0}
+
+        def limited(t, timeout=10):
+            calls["usage"] += 1
+            raise urllib.error.HTTPError(sources.USAGE_URL, 429, "Too Many", {}, None)
+
+        def profile(t, timeout=10):
+            calls["profile"] += 1
+            return PROFILE
+        for _ in range(5):
+            refresh.run_once(target, "t", fetch=limited, fetch_profile=profile, seconds=60)
+        self.assertEqual(calls, {"usage": 1, "profile": 0})
+        self.assertEqual(cache.failure_path(target).read_text(encoding="utf-8"), "300")
+        # The pause ran out, the server refuses again: the next one is longer.
+        old = os.path.getmtime(cache.failure_path(target)) - 400
+        os.utime(cache.failure_path(target), (old, old))
+        refresh.run_once(target, "t", fetch=limited, fetch_profile=profile, seconds=60)
+        self.assertEqual(cache.failure_path(target).read_text(encoding="utf-8"), "600")
+
+    def test_a_fresh_cache_is_not_fetched_again_after_waiting_for_the_lock(self):
+        target = cache.default_path()
+        cache.write(target, {"limits": []})
+        calls = []
+        refresh.run_once(target, "t", fetch=lambda t, timeout=10: calls.append(1) or {},
+                         seconds=60)
+        self.assertEqual(calls, [])
 
     def test_rate_limit_backs_off_as_asked(self):
         import urllib.error

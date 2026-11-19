@@ -23,23 +23,55 @@ COLLECT_EVERY = 6 * 3600
 # How long to stay away after the server said "too many requests" without
 # naming a time.
 RATE_LIMIT_PAUSE = 300
+# A server that keeps saying "too many requests" gets more room each time,
+# up to an hour.
+RATE_LIMIT_MAX = 3600
 # The plan changes rarely; asking once an hour is plenty.
 PLAN_EVERY = 3600
 
 
-def _wait_from(error):
-    """Seconds a rate-limited answer asks to wait, or None for other errors."""
+def _previous_wait(path):
+    try:
+        return int(cache.failure_path(path).read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def _wait_from(error, previous=0):
+    """Seconds to stay away after a rate-limited answer, None for other errors.
+
+    Retry-After is honoured; without it the pause starts at five minutes and
+    doubles while the server keeps refusing.
+    """
     if getattr(error, "code", None) != 429:
         return None
     try:
-        return max(RATE_LIMIT_PAUSE, int(error.headers.get("Retry-After") or 0))
+        asked = int(error.headers.get("Retry-After") or 0)
     except (AttributeError, TypeError, ValueError):
-        return RATE_LIMIT_PAUSE
+        asked = 0
+    grown = min(RATE_LIMIT_MAX, previous * 2) if previous else RATE_LIMIT_PAUSE
+    return max(RATE_LIMIT_PAUSE, asked, grown)
+
+
+def rate_limited(path):
+    """True while a rate-limit pause from the server is running."""
+    return _previous_wait(path) > 0 and cache.pause_after_failure(path, 0)
+
+
+def due(cache_path, seconds):
+    """Whether the usage lookup should run now: stale and not pausing."""
+    return cache.is_stale(cache_path, seconds) and \
+        not cache.pause_after_failure(cache_path, seconds)
+
+
+def plan_due(plan_file):
+    return cache.is_stale(plan_file, PLAN_EVERY) and \
+        not cache.pause_after_failure(plan_file, PLAN_EVERY)
 
 
 def run_once(cache_path, token, fetch=None, timeout=10, fetch_profile=None,
-             plan_path=None):
-    """Look up once and write the cache. Always returns 0.
+             plan_path=None, seconds=0):
+    """Look up what is due and write the cache. Always returns 0.
 
     The token is passed in explicitly and never read here. Otherwise None
     would mean both "no token" and "go get it yourself", and a test could
@@ -49,8 +81,11 @@ def run_once(cache_path, token, fetch=None, timeout=10, fetch_profile=None,
     usage lookup is the real one. Whoever injects `fetch` gets no hidden
     network call for the plan.
 
-    Usage and plan are separate lookups with separate files: one failing
-    leaves the other untouched.
+    Usage and plan are separate lookups with separate files and separate
+    pauses: one failing leaves the other untouched. Both are checked again
+    after taking the lock, so a window that waited for it does not repeat
+    the lookup another window just made. A rate limit on one means no
+    request on the other in the same run.
     """
     if not token:
         return 0
@@ -59,24 +94,32 @@ def run_once(cache_path, token, fetch=None, timeout=10, fetch_profile=None,
     if handle is None:
         return 0
 
+    # Both lookups go to the same server: while it asks for a break, neither
+    # is made.
+    limited = rate_limited(cache_path) or rate_limited(cache_path.with_name("plan.json")
+                                                       if plan_path is None else plan_path)
     try:
-        try:
-            lookup = fetch or sources.fetch_usage
-            cache.write(cache_path, sources.reduce_usage(lookup(token, timeout=timeout)))
-            cache.forget_failure(cache_path)
-        except Exception as error:
-            cache.remember_failure(cache_path, _wait_from(error))
+        if not limited and due(cache_path, seconds):
+            try:
+                lookup = fetch or sources.fetch_usage
+                cache.write(cache_path, sources.reduce_usage(lookup(token, timeout=timeout)))
+                cache.forget_failure(cache_path)
+            except Exception as error:
+                wait = _wait_from(error, _previous_wait(cache_path))
+                limited = limited or wait is not None
+                cache.remember_failure(cache_path, wait)
 
         if fetch_profile is None and fetch is None:
             fetch_profile = sources.fetch_profile
         plan_file = plan_path or cache_path.with_name("plan.json")
-        if fetch_profile is not None and cache.is_stale(plan_file, PLAN_EVERY):
+        if fetch_profile is not None and not limited and plan_due(plan_file):
             try:
                 plan = sources.reduce_profile(fetch_profile(token, timeout=timeout))
                 if plan:
                     cache.write(plan_file, {"plan": plan})
-            except Exception:
-                pass
+                cache.forget_failure(plan_file)
+            except Exception as error:
+                cache.remember_failure(plan_file, _wait_from(error, _previous_wait(plan_file)))
     finally:
         locks.release(handle)
     return 0

@@ -39,8 +39,9 @@ HERE = Path(__file__).resolve().parent
 
 
 def claude_dir():
-    custom = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(os.path.expanduser(custom)) if custom else Path.home() / ".claude"
+    # The launcher lives in <config>/claude-statusline/, so its own place
+    # names the config folder, also in a terminal without CLAUDE_CONFIG_DIR.
+    return HERE.parent
 
 
 def version_key(path):
@@ -59,7 +60,8 @@ def find():
     except Exception:
         info = {}
     if info.get("mode") == "plugin":
-        found = list(claude_dir().glob("plugins/cache/*/calm-statusline/*/statusline.py"))
+        found = [p for p in claude_dir().glob("plugins/cache/*/calm-statusline/*/statusline.py")
+                 if not (p.parent / ".orphaned_at").exists()]
         if found:
             return max(found, key=version_key).parent
     code = info.get("code")
@@ -77,6 +79,7 @@ def main():
             return 0
         print("claude-statusline: code not found, please run the setup again", file=sys.stderr)
         return 1
+    os.environ.setdefault("CLAUDE_CONFIG_DIR", str(claude_dir()))
     script = code / ("statusline.py" if what == "statusline" else "claude_costs.py")
     sys.argv = [str(script)] + sys.argv[2:]
     sys.path.insert(0, str(code))
@@ -147,7 +150,7 @@ def backup(path):
         # user's own settings.
         n += 1
         target = source.with_name("{}-{}".format(stamp, n))
-    shutil.copyfile(str(source), str(target))
+    shutil.copy2(str(source), str(target))     # with the original permissions
     return target
 
 
@@ -159,12 +162,30 @@ def launcher_path(env=None):
     return paths.data_file("run.py", env)
 
 
-def statusline_command(python, env=None):
-    return '"{}" "{}" statusline'.format(posix(python), posix(launcher_path(env)))
+def statusline_command(python, env=None, windows=None):
+    """The command for settings.json.
+
+    On Windows without Git Bash, Claude Code runs it in PowerShell, where a
+    quoted program path at the start is a string, not a call. An unquoted
+    interpreter path works in both shells; with spaces in that path the py
+    launcher stands in.
+    """
+    launcher = '"{}" statusline'.format(posix(launcher_path(env)))
+    if os.name == "nt" if windows is None else windows:
+        exe = posix(python)
+        if " " not in exe:
+            return "{} {}".format(exe, launcher)
+        if shutil.which("py"):
+            return "py -3 {}".format(launcher)
+    return '"{}" {}'.format(posix(python), launcher)
 
 
-def is_ours(entry):
-    return isinstance(entry, dict) and MARK in str(entry.get("command", ""))
+def is_ours(entry, env=None):
+    """Only a status line that runs our launcher is ours. Other projects may
+    well have "claude-statusline" in their path."""
+    if not isinstance(entry, dict):
+        return False
+    return posix(launcher_path(env)) in posix(str(entry.get("command", "")))
 
 
 def bin_dir():
@@ -215,7 +236,7 @@ def install(code_dir, python=None, mode="repo", force=False, commands=True,
 
     current = read_settings(settings)
     existing = current.get("statusLine")
-    replace = existing is None or is_ours(existing) or force
+    replace = existing is None or is_ours(existing, env) or force
     if not replace:
         warnings.append("A status line is already configured ({}). Nothing changed there; "
                         "use --force to replace it (a backup is kept).".format(
@@ -229,7 +250,7 @@ def install(code_dir, python=None, mode="repo", force=False, commands=True,
     info = {"mode": mode, "code": posix(code_dir), "python": posix(python)}
     # A status line that gets replaced comes back on uninstall.
     earlier = _read_record(env).get("previous_statusline")
-    if existing is not None and not is_ours(existing) and replace:
+    if existing is not None and not is_ours(existing, env) and replace:
         earlier = existing
     if earlier is not None:
         info["previous_statusline"] = earlier
@@ -302,7 +323,7 @@ def uninstall(settings=None, env=None):
     plan = Plan()
     current = read_settings(settings)
     earlier = _read_record(env).get("previous_statusline")
-    if is_ours(current.get("statusLine")):
+    if is_ours(current.get("statusLine"), env):
         def remove_statusline():
             data = read_settings(settings)
             saved = backup(settings)

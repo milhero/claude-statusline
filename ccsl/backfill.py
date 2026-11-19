@@ -69,9 +69,13 @@ def author_emails(repo, extra=None, run=subprocess.run):
 
 
 def _author_args(emails):
-    # Several --author options are OR-ed by git. Matching the bare address
-    # inside <...> avoids hits on similar names.
-    return ["--author=<{}>".format(e) for e in emails]
+    # Several --author options are OR-ed by git. The address inside <...> is
+    # matched literally and regardless of case: Jane.Doe@Example.com in the
+    # history is the same person as jane.doe@example.com in the config.
+    if not emails:
+        return []
+    return ["--fixed-strings", "--regexp-ignore-case"] + \
+        ["--author=<{}>".format(e) for e in emails]
 
 
 def lines_per_day(repo, emails=None, since=None, until=None, run=subprocess.run):
@@ -223,11 +227,14 @@ def compute(records, ctx, user_rules, archive_start, invoices, rates, cfg,
     measure = cfg.get("backfill_measure", "lines")
     count = counter or (lines_per_day if measure == "lines" else commits_per_day)
     extra = cfg.get("git_author_emails") or []
+    begin = first_use(invoices, history_file)
     units, own_only = {}, {}
     for name, repo in repos.items():
         emails = author_emails(repo, extra)
         own_only[name] = bool(emails)
-        units[name] = count(repo, emails)
+        # Nothing before the first use of Claude Code can count; reading the
+        # whole history of a large repository would only cost time.
+        units[name] = count(repo, emails, since=begin.isoformat() if begin else None)
 
     measured = attribution.evaluate(records, ctx, [])
     usd_per_project = {p["name"]: p["api_usd"] for p in measured["projects"]}
@@ -235,7 +242,6 @@ def compute(records, ctx, user_rules, archive_start, invoices, rates, cfg,
                       for name, days in units.items()}
     rates_per_unit = rate_per_unit(usd_per_project, units_measured)
 
-    begin = first_use(invoices, history_file)
     per_day = daily_values(units, rates_per_unit, until=archive_start, since=begin)
     capped = {}
     for day, shares in per_day.items():
@@ -325,7 +331,4 @@ def archive_start(records):
     days = [d for d in days if d]
     return min(days) if days else None
 
-
-def today():
-    return datetime.now(timezone.utc).astimezone().date()
 

@@ -141,6 +141,9 @@ class Run:
         self.ctx = rules_mod.Context(self.user_rules, roots=cfg.get("project_roots"),
                                      env=env, known_roots=attribution.known_roots(self.records))
         self.invoices, self.currency = inv.load(env=env)
+        if self.invoices and not self.currency:
+            # Shown as "?" rather than guessed; the self-check says why.
+            self.currency = "?"
         self.today = checks.today_local()
         self.rates = daily_rates.measured(self.records, self.invoices)
         self.start = backfill.archive_start(self.records)
@@ -194,10 +197,17 @@ def collect(cfg=None, env=None):
 def collect_and_summarize(env=None):
     """What the status line's background process runs every few hours."""
     cfg = config.load(env=env)
-    collect(cfg, env)
+    if collect(cfg, env).get("busy"):
+        # Another window is writing the archive right now; its run will
+        # write the summary. Writing one now would use old numbers.
+        return
     run = Run(cfg, env)
     if run.records:
-        run.write_summary(run.summary(lang=i18n.resolve(cfg.get("language"))))
+        result = run.summary(lang=i18n.resolve(cfg.get("language")))
+        result["other_machines"] = other_machines.value(
+            other_machines.read(other_machines.default_path(env)),
+            archive.derive_prices(run.records))
+        run.write_summary(result)
 
 
 def main(argv=None, env=None):

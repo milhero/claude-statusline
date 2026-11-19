@@ -48,7 +48,9 @@ def read_input():
 
 def claude_theme(env=None):
     """Claude Code's theme: settings.json first, the older ~/.claude.json after."""
-    for path in (paths.settings_file(env), paths.home() / ".claude.json"):
+    custom = (os.environ if env is None else env).get("CLAUDE_CONFIG_DIR")
+    legacy = paths.claude_dir(env) / ".claude.json" if custom else paths.home() / ".claude.json"
+    for path in (paths.settings_file(env), legacy):
         try:
             value = json.loads(path.read_text(encoding="utf-8")).get("theme")
         except Exception:
@@ -113,7 +115,10 @@ def build_status(data, cfg):
         except Exception:
             pass
         try:
-            cached = cache.read(path, cfg.get("cache_seconds", 300))
+            # Shown while it is at most an hour old: a value a little past
+            # cache_seconds is still right, and during a rate-limit pause it
+            # is the best there is.
+            cached = cache.read(path, cache.MAX_AGE)
             if cached is not None:
                 status.scoped = sources.scoped_gauge(cached)
                 # The lookup knows the server's state across all surfaces,
@@ -131,9 +136,7 @@ def build_status(data, cfg):
         due_lookup = False
         if cfg.get("live_lookup"):
             limit = cfg.get("cache_seconds", 300)
-            due_lookup = ((cache.is_stale(path, limit)
-                           and not cache.pause_after_failure(path, limit))
-                          or cache.is_stale(cache.plan_path(), refresh.PLAN_EVERY))
+            due_lookup = refresh.due(path, limit) or refresh.plan_due(cache.plan_path())
         if due_lookup or (cfg.get("cost_tracking") and refresh.collect_due()):
             refresh.spawn(sys.executable, Path(__file__).resolve())
     except Exception:
@@ -324,9 +327,9 @@ def main(argv):
         if cfg.get("live_lookup"):
             limit = cfg.get("cache_seconds", 300)
             path = cache.default_path()
-            if (cache.is_stale(path, limit) and not cache.pause_after_failure(path, limit)) \
-                    or cache.is_stale(cache.plan_path(), refresh.PLAN_EVERY):
-                refresh.run_once(path, sources.read_token(), plan_path=cache.plan_path())
+            if refresh.due(path, limit) or refresh.plan_due(cache.plan_path()):
+                refresh.run_once(path, sources.read_token(), plan_path=cache.plan_path(),
+                                 seconds=limit)
         refresh.collect_if_due(cfg)
         return 0
     if "--demo" in argv:

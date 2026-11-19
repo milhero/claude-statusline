@@ -149,7 +149,7 @@ def load(path=None, env=None):
         path = default_path(env)
 
     try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         if isinstance(raw, dict):
             _merge(cfg, raw)
     except Exception:
@@ -178,7 +178,7 @@ def save(changes, path=None, env=None):
     """Merge changes into the settings file, keeping everything else in it."""
     path = Path(path) if path else default_path(env)
     try:
-        current = json.loads(path.read_text(encoding="utf-8"))
+        current = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(current, dict):
             current = {}
     except Exception:

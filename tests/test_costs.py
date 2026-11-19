@@ -76,6 +76,9 @@ class TestBackfill(Sandbox):
         counts = backfill.lines_per_day("/repo", emails, run=git)
         self.assertEqual(counts, {date(2026, 8, 1): 15, date(2026, 8, 2): 2})
         self.assertIn("--author=<me@example.org>", git.calls[-1])
+        # Jane.Doe@Example.com in the history is the same person.
+        self.assertIn("--regexp-ignore-case", git.calls[-1])
+        self.assertIn("--fixed-strings", git.calls[-1])
 
     def test_average_rate_only_from_projects_with_cost_and_lines(self):
         rates = backfill.rate_per_unit({"a": 10.0, "notes": 50.0}, {"a": 100, "notes": 0})

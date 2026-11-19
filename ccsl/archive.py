@@ -18,13 +18,18 @@ total; read naively, real data lost 278 $ and counted 365 $ twice.
 """
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
 from . import locks, paths
 from . import rules as rules_mod
 from .rules import is_temp, normalize
-from .session_project import COMMAND_FIELD, PATH_FIELD, paths_in_command, unescape
+from .session_project import COMMAND_FIELD, paths_in_command, unescape
+
+# Edited and written files. The working directory has its own signal; matching
+# "cwd" here as well would count its parent folder a second time.
+FILE_FIELD = re.compile(r'"(?:file_path|notebook_path)"\s*:\s*"((?:[^"\\]|\\.){3,400})"')
 
 # How deep a path is kept. Only WHERE a file lives matters for attribution,
 # never its name; the git root is stored separately, so deep repositories
@@ -281,7 +286,7 @@ def read_session(file, ctx=None, extra=None):
             continue
         if record.get("cwd"):
             signals.add_cwd(record["cwd"], out)
-        for raw in PATH_FIELD.findall(line):
+        for raw in FILE_FIELD.findall(line):
             signals.add_file(unescape(raw), out)
         # Where the shell worked. For sessions that do everything through
         # commands this is often the only signal.
@@ -516,8 +521,14 @@ def collect(source=None, target=None, ctx=None, state=None, full=False):
                     except OSError:
                         continue
                     mark = [max(mark[0], int(sub_st.st_mtime)), mark[1] + sub_st.st_size]
-                now_seen[str(file)] = mark
-                if seen.get(str(file)) == mark:
+                before_mark = seen.get(str(file))
+                # The state also remembers which session a file held. A file
+                # is only skipped while that session is still in the
+                # archive: after a deleted or restored archive, everything
+                # is read again.
+                if isinstance(before_mark, list) and before_mark[:2] == mark \
+                        and len(before_mark) > 2 and before_mark[2] in known:
+                    now_seen[str(file)] = before_mark
                     continue
                 try:
                     record = read_session(file, ctx, extra)
@@ -527,6 +538,7 @@ def collect(source=None, target=None, ctx=None, state=None, full=False):
                 if record is None:
                     skipped += 1
                     continue
+                now_seen[str(file)] = mark + [record["session"]]
                 old = known.get(record["session"])
                 if old is not None:
                     if not should_replace(old, record):

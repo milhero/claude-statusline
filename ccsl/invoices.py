@@ -124,10 +124,6 @@ def plan_on(day, invoices):
     return _covering(day, ordered(invoices))[2]
 
 
-def paid_total(invoices):
-    return sum(amount for _, amount, _ in ordered(invoices))
-
-
 def spread(shares, fee):
     """Spread a daily fee. Returns (per project, unused rest)."""
     total = sum(v for v in (shares or {}).values() if isinstance(v, (int, float)))
@@ -140,7 +136,7 @@ def load(path=None, env=None):
     """(invoices, currency). No file means no subscription share, not an error."""
     target = Path(path) if path else default_path(env)
     try:
-        data = json.loads(target.read_text(encoding="utf-8"))
+        data = json.loads(target.read_text(encoding="utf-8-sig"))
     except Exception:
         return [], None
     if isinstance(data, list):

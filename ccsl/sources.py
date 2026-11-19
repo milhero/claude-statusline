@@ -11,6 +11,7 @@ values are missing and everything else stays visible.
 """
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -90,6 +91,51 @@ def shorten_directory(path):
     return path
 
 
+def git_branch(directory, limit=40):
+    """The checked-out branch of the repository a folder lives in, or None.
+
+    Read from .git/HEAD instead of running git: this happens on every redraw.
+    A worktree's .git is a file pointing to its own HEAD. A detached HEAD
+    shows as a short commit id.
+    """
+    if not isinstance(directory, str) or not directory:
+        return None
+    current = os.path.abspath(directory)
+    for _ in range(limit):
+        dotgit = os.path.join(current, ".git")
+        try:
+            if os.path.isdir(dotgit):
+                head = os.path.join(dotgit, "HEAD")
+                break
+            if os.path.isfile(dotgit):
+                with open(dotgit, encoding="utf-8", errors="replace") as f:
+                    pointer = f.read().strip()
+                if not pointer.startswith("gitdir:"):
+                    return None
+                gitdir = pointer[len("gitdir:"):].strip()
+                if not os.path.isabs(gitdir):
+                    gitdir = os.path.join(current, gitdir)
+                head = os.path.join(gitdir, "HEAD")
+                break
+        except OSError:
+            return None
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+    else:
+        return None
+    try:
+        with open(head, encoding="utf-8", errors="replace") as f:
+            text = f.read().strip()
+    except OSError:
+        return None
+    if text.startswith("ref:"):
+        ref = text[4:].strip()
+        return ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+    return text[:7] or None
+
+
 def from_stdin(data, lang="en"):
     """Source A. Survives any missing field and any wrong type."""
     s = Status()
@@ -117,8 +163,9 @@ def from_stdin(data, lang="en"):
     workspace = data.get("workspace")
     if isinstance(workspace, dict):
         s.directory = shorten_directory(workspace.get("current_dir"))
-        branch = workspace.get("git_worktree")
-        s.branch = branch if isinstance(branch, str) and branch else None
+        # workspace.git_worktree only names a linked worktree; the branch
+        # itself comes from the repository.
+        s.branch = git_branch(workspace.get("current_dir"))
 
     cost = data.get("cost")
     if isinstance(cost, dict):

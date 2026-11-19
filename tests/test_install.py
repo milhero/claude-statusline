@@ -54,6 +54,31 @@ class TestInstaller(Sandbox):
         line = self.settings()["statusLine"]
         self.assertEqual((line["padding"], line["refreshInterval"]), (2, 30))
 
+    def test_another_projects_claude_statusline_is_not_mistaken_for_ours(self):
+        foreign = {"type": "command", "command": "bash ~/my-claude-statusline/run.sh"}
+        paths.settings_file().write_text(json.dumps({"statusLine": foreign}), encoding="utf-8")
+        warnings = self.install()
+        self.assertEqual(self.settings()["statusLine"], foreign)
+        self.assertTrue(warnings)
+
+    @unittest.skipIf(os.name == "nt", "POSIX permissions")
+    def test_permissions_of_settings_and_backup_are_kept(self):
+        paths.settings_file().write_text("{}", encoding="utf-8")
+        os.chmod(str(paths.settings_file()), 0o600)
+        self.install()
+        self.assertEqual(os.stat(str(paths.settings_file())).st_mode & 0o777, 0o600)
+        for saved in self.claude.glob("settings.json.bak-*"):
+            self.assertEqual(os.stat(str(saved)).st_mode & 0o777, 0o600)
+
+    def test_windows_command_works_in_powershell_too(self):
+        cmd = installer.statusline_command("C:/Python312/python.exe", windows=True)
+        self.assertTrue(cmd.startswith("C:/Python312/python.exe "))
+        self.assertIn("statusline", cmd)
+        with mock.patch.object(installer.shutil, "which", return_value="C:/Windows/py.exe"):
+            cmd = installer.statusline_command("C:/Program Files/Python/python.exe",
+                                               windows=True)
+        self.assertTrue(cmd.startswith("py -3 "))
+
     def test_dry_run_changes_nothing(self):
         with mock.patch.object(installer, "bin_dir", lambda: self.home / ".local" / "bin"):
             plan, _ = installer.install(ROOT, choices={"theme": "traffic"})
@@ -99,6 +124,12 @@ class TestInstaller(Sandbox):
         out = subprocess.run([sys.executable, str(paths.data_file("run.py")), "statusline"],
                              capture_output=True, text=True, timeout=60)
         self.assertEqual(out.stdout.strip(), "version 1.10.0")
+        # A version Claude Code marked for removal is passed over.
+        newest = self.claude / "plugins" / "cache" / "milhero" / "calm-statusline" / "1.10.0"
+        (newest / ".orphaned_at").write_text("x", encoding="utf-8")
+        out = subprocess.run([sys.executable, str(paths.data_file("run.py")), "statusline"],
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.stdout.strip(), "version 1.9.2")
 
     def test_install_script_help_installs_nothing(self):
         out = subprocess.run([sys.executable, str(ROOT / "install.py"), "--help"],

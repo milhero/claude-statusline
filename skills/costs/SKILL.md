@@ -7,9 +7,11 @@ Show the cost report of claude-statusline and explain it briefly.
 
 Find Python as in the setup (`python3`, `python`, or `py -3`) and run, from any directory:
 
-`<python> "${CLAUDE_PLUGIN_ROOT}/claude_costs.py" $ARGUMENTS`
+`<python> "${CLAUDE_PLUGIN_ROOT}/claude_costs.py" <arguments>`
 
-Useful arguments, pick what fits the question:
+The user's request: $ARGUMENTS
+
+Translate it into the arguments below; never pass the user's words through as they are (the command only knows these options). With no request, run it without arguments.
 
 | Argument | Shows |
 | --- | --- |

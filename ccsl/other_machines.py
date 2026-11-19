@@ -25,7 +25,7 @@ def default_path(env=None):
 def read(path=None):
     """The file's entries. Missing or malformed means none."""
     try:
-        content = json.loads((path or default_path()).read_text(encoding="utf-8"))
+        content = json.loads((path or default_path()).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return []
     entries = content.get("entries") if isinstance(content, dict) else content

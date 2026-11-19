@@ -173,7 +173,9 @@ def _header(period, lang):
 
 def table(result, width=100, color=False, currency=None, lang="en"):
     """The main table: API value, subscription share and compute per project."""
-    projects = merge_small(result.get("projects") or [], result.get("api_usd_total") or 0, lang)
+    projects = [p for p in result.get("projects") or [] if p.get("api_usd")
+                or p.get("sub_share")]
+    projects = merge_small(projects, result.get("api_usd_total") or 0, lang)
     period = result.get("period") or {}
     with_sub = bool(currency) and bool((result.get("subscription") or {}).get("paid"))
     lines = [_q(_header(period, lang), color), ""]
