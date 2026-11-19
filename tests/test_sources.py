@@ -11,7 +11,8 @@ from tests.helpers import Sandbox
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 PROFILE = {"account": {"email_address": "secret@example.org"},
            "organization": {"plan_display_label": "Ultra plan",
-                            "rate_limit_tier": "default_claude_max_20x", "uuid": "secret-uuid"}}
+                            "rate_limit_tier": "default_claude_max_20x", "uuid": "secret-uuid",
+                            "organization_type": "claude_max"}}
 
 
 def usage(token, timeout=10):
@@ -44,11 +45,24 @@ class TestPlan(Sandbox):
         self.assertEqual(sources.tier_from_name("", None), (None, None))
 
     def test_plan_and_token_from_the_credentials_file(self):
+        # What a Pro login really holds: the generic tier says nothing.
         paths.credentials_file().write_text(json.dumps({"claudeAiOauth": {
-            "rateLimitTier": "default_claude_pro", "accessToken": "sk-x"}}), encoding="utf-8")
+            "subscriptionType": "pro", "rateLimitTier": "default_claude_ai",
+            "accessToken": "sk-x"}}), encoding="utf-8")
         self.assertEqual(sources.read_plan(), ("Pro", "pro"))
         self.assertEqual(sources.read_token(), "sk-x")
         self.assertNotIn("sk-x", repr(sources.read_plan()))
+
+    def test_subscription_names_the_plan_the_tier_only_the_size_of_max(self):
+        self.assertEqual(sources.tier_from_name(None, "default_claude_max_20x", "max"),
+                         ("Max 20x", "max_20x"))
+        self.assertEqual(sources.tier_from_name(None, "default_claude_ai", "claude_team"),
+                         ("Team", "team"))
+        self.assertEqual(sources.tier_from_name(None, None, "enterprise"),
+                         ("Enterprise", "unknown"))
+        # Without a subscription type the generic tier is not turned into a name.
+        self.assertEqual(sources.tier_from_name(None, "default_claude_ai"), (None, None))
+        self.assertEqual(sources.tier_from_name(None, None, "galaxy"), ("Galaxy", "unknown"))
 
     def test_keychain_only_on_macos(self):
         with mock.patch.object(sources.subprocess, "run") as run:
@@ -95,8 +109,22 @@ class TestUsage(unittest.TestCase):
 
     def test_profile_keeps_nothing_personal(self):
         reduced = sources.reduce_profile(PROFILE)
-        self.assertEqual(reduced, {"name": "Ultra plan", "tier": "default_claude_max_20x"})
+        self.assertEqual(reduced, {"name": "Ultra plan", "tier": "default_claude_max_20x",
+                                   "kind": "max"})
         self.assertEqual(sources.plan_from_cache({"plan": reduced}), ("Ultra", "ultra"))
+
+    def test_pro_profile_from_the_server(self):
+        pro = {"organization": {"organization_type": "claude_pro",
+                                "rate_limit_tier": "default_claude_ai"}}
+        reduced = sources.reduce_profile(pro)
+        self.assertEqual(reduced, {"name": None, "tier": "default_claude_ai", "kind": "pro"})
+        self.assertEqual(sources.plan_from_cache({"plan": reduced}), ("Pro", "pro"))
+        # A label from the server keeps the tier the subscription gives.
+        labelled = dict(reduced, name="Pro plan")
+        self.assertEqual(sources.plan_from_cache({"plan": labelled}), ("Pro", "pro"))
+        # A plan stored before the subscription type was kept.
+        self.assertEqual(sources.plan_from_cache({"plan": {"name": None,
+                                                           "tier": "default_claude_ai"}}), None)
 
     def test_fresher(self):
         from datetime import datetime, timezone

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Pro plans showed as "ai" (#1). The plan now comes from the subscription type, as in Claude Code; the rate limit tier only tells Max 5x from Max 20x. A tier several plans share, like `default_claude_ai`, no longer turns into a plan name.
+
 ## 1.0.0
 
 First public release.

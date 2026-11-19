@@ -19,14 +19,31 @@ from datetime import datetime, timezone
 from . import i18n, paths
 from .model import Gauge, Status
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
-# rate_limit_tier as Claude Code and the API name it -> (display, tier)
+# rate_limit_tier as Claude Code and the API name it -> (display, tier).
+# It only says how big a Max plan is. The plan itself comes from the
+# subscription type, just as in Claude Code.
 TIERS = {
     "default_claude_max_20x": ("Max 20x", "max_20x"),
     "default_claude_max_5x": ("Max 5x", "max_5x"),
     "default_claude_pro": ("Pro", "pro"),
     "default_claude_team": ("Team", "team"),
+}
+
+# Tiers several plans share. Pro accounts report default_claude_ai, so the
+# tier alone must not name the plan ("ai").
+GENERIC_TIERS = ("default_claude_ai",)
+
+# subscriptionType in the credentials, organization_type ("claude_pro") in
+# the server's profile -> (display, tier). Max and Enterprise keep the tier
+# open: the size of a Max plan is only known from the rate limit tier.
+SUBSCRIPTIONS = {
+    "pro": ("Pro", "pro"),
+    "max": ("Max", "unknown"),
+    "team": ("Team", "team"),
+    "enterprise": ("Enterprise", "unknown"),
+    "free": ("Free", "unknown"),
 }
 
 # Plan names that decide the tier on their own. Ultra currently shares its
@@ -232,19 +249,35 @@ def credentials_source(path=None):
     return "keychain" if _keychain() else None
 
 
-def tier_from_name(name, tier_id):
-    """(display, tier) from a plan name and/or a rate limit tier.
+def _subscription(kind):
+    """'pro' from 'pro' or 'claude_pro', None for anything else."""
+    if not isinstance(kind, str):
+        return None
+    clean = kind.strip().lower()
+    if clean.startswith("claude_"):
+        clean = clean[len("claude_"):]
+    return clean or None
 
-    An unknown id is not guessed. It is made readable and gets the tier
-    "unknown", so the rendering treats it neutrally instead of ranking it.
+
+def tier_from_name(name, tier_id, kind=None):
+    """(display, tier) from a plan name, a rate limit tier and a subscription type.
+
+    A known tier wins (it tells Max 5x from Max 20x), then the subscription
+    type. An unknown id is not guessed. It is made readable and gets the
+    tier "unknown", so the rendering treats it neutrally instead of ranking
+    it. A generic tier is never made readable, it names no plan.
     """
     display, tier = None, None
-    if isinstance(tier_id, str) and tier_id:
-        if tier_id in TIERS:
-            display, tier = TIERS[tier_id]
-        else:
-            readable = tier_id.replace("default_claude_", "").replace("_", " ").strip()
-            display, tier = (readable or None), "unknown"
+    sub = _subscription(kind)
+    if isinstance(tier_id, str) and tier_id in TIERS:
+        display, tier = TIERS[tier_id]
+    elif sub in SUBSCRIPTIONS:
+        display, tier = SUBSCRIPTIONS[sub]
+    elif isinstance(tier_id, str) and tier_id and tier_id not in GENERIC_TIERS:
+        readable = tier_id.replace("default_claude_", "").replace("_", " ").strip()
+        display, tier = (readable or None), "unknown"
+    elif sub:
+        display, tier = sub.replace("_", " ").capitalize(), "unknown"
     if isinstance(name, str) and name.strip():
         clean = name.strip()
         if clean.lower().endswith(" plan"):
@@ -266,13 +299,7 @@ def read_plan(path=None, keychain=False):
     the server's answer (plan_from_cache) wins whenever it exists.
     """
     block = _oauth(path, keychain=keychain)
-    tier_id = block.get("rateLimitTier")
-    if isinstance(tier_id, str) and tier_id:
-        return tier_from_name(None, tier_id)
-    sub = block.get("subscriptionType")
-    if isinstance(sub, str) and sub:
-        return sub.capitalize(), "unknown"
-    return None, None
+    return tier_from_name(None, block.get("rateLimitTier"), block.get("subscriptionType"))
 
 
 def read_token(path=None):
@@ -400,16 +427,18 @@ def fetch_profile(token, timeout=10):
 
 
 def reduce_profile(profile):
-    """Keep plan name and tier, nothing personal."""
+    """Keep plan name, tier and subscription type, nothing personal."""
     org = profile.get("organization") if isinstance(profile, dict) else None
     if not isinstance(org, dict):
         return None
     name = org.get("plan_display_label")
     tier = org.get("rate_limit_tier")
-    if not (isinstance(name, str) and name) and not (isinstance(tier, str) and tier):
+    kind = _subscription(org.get("organization_type"))
+    if not any(isinstance(v, str) and v for v in (name, tier, kind)):
         return None
     return {"name": name if isinstance(name, str) else None,
-            "tier": tier if isinstance(tier, str) else None}
+            "tier": tier if isinstance(tier, str) else None,
+            "kind": kind}
 
 
 def plan_from_cache(cached):
@@ -417,5 +446,5 @@ def plan_from_cache(cached):
     plan = cached.get("plan") if isinstance(cached, dict) else None
     if not isinstance(plan, dict):
         return None
-    display, tier = tier_from_name(plan.get("name"), plan.get("tier"))
+    display, tier = tier_from_name(plan.get("name"), plan.get("tier"), plan.get("kind"))
     return (display, tier) if display else None
