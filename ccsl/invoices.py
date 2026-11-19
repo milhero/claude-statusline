@@ -20,6 +20,7 @@ subscription invoice.
 """
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -47,6 +48,26 @@ def as_date(value):
         return None
 
 
+def canonical_plan(name):
+    """A plan name in the spelling the rates use ("Max 20x", "Pro").
+
+    Invoices are also written by hand. "Claude Max (20x)" or "claude pro"
+    must count as the plan they name, or the rate of an unmeasured plan
+    cannot be derived from a measured one. Anything else stays as written.
+    """
+    if not isinstance(name, str) or not name.strip():
+        return None
+    text = re.sub(r"claude|plan|abo|subscription", " ", name.lower())
+    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    compact = text.replace(" ", "")
+    if "20x" in compact or compact.startswith("max20"):
+        return "Max 20x"
+    if "5x" in compact or compact.startswith("max5"):
+        return "Max 5x"
+    named = {"pro": "Pro", "team": "Team", "teams": "Team", "free": "Free", "ultra": "Ultra"}
+    return named.get(text, name)
+
+
 def _entries(invoices, kind=None):
     """Valid entries sorted by date, optionally of one kind only.
 
@@ -64,7 +85,7 @@ def _entries(invoices, kind=None):
         own = entry.get("kind") or "subscription"
         if kind is not None and own != kind:
             continue
-        valid.append((day, float(amount), entry.get("plan")))
+        valid.append((day, float(amount), canonical_plan(entry.get("plan"))))
     valid.sort(key=lambda e: e[0])
     return valid
 

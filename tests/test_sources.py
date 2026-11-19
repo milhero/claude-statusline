@@ -70,6 +70,36 @@ class TestPlan(Sandbox):
                 self.assertEqual(sources._keychain(), {})
             run.assert_not_called()
 
+    def test_keychain_entry_is_named_like_claude_code_names_it(self):
+        self.assertEqual(sources.keychain_service({}), "Claude Code-credentials")
+        self.assertEqual(sources.keychain_service({"CLAUDE_CONFIG_DIR": ""}),
+                         "Claude Code-credentials")
+        # With an own config folder Claude Code adds the first 8 hex digits
+        # of the SHA-256 of the folder as given.
+        self.assertEqual(sources.keychain_service({"CLAUDE_CONFIG_DIR": "/Users/ada/.claude-work"}),
+                         "Claude Code-credentials-6a5b8464")
+        self.assertEqual(sources.keychain_service({"CLAUDE_CONFIG_DIR": "/Users/ada/.claude-work",
+                                                   "CLAUDE_SECURESTORAGE_CONFIG_DIR": "/vault"}),
+                         "Claude Code-credentials-27d33c88")
+        self.assertEqual(sources.keychain_service({"CLAUDE_CONFIG_DIR": "/Users/ada/.claude-work",
+                                                   "CLAUDE_SECURESTORAGE_CONFIG_DIR": ""}),
+                         "Claude Code-credentials")
+
+    def test_keychain_lookup_uses_the_entry_of_the_config_folder(self):
+        answer = mock.Mock(returncode=0, stdout=json.dumps({"claudeAiOauth": {"accessToken": "k"}}))
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "/Users/ada/.claude-work"}), \
+                mock.patch.object(sources.subprocess, "run", return_value=answer) as run:
+            sources._keychain()
+        self.assertIn("Claude Code-credentials-6a5b8464", run.call_args[0][0])
+
+    def test_secure_storage_folder_holds_the_credentials_file(self):
+        self.assertEqual(paths.credentials_file({"CLAUDE_SECURESTORAGE_CONFIG_DIR": "/vault",
+                                                 "CLAUDE_CONFIG_DIR": "/c"}),
+                         Path("/vault") / ".credentials.json")
+        self.assertEqual(paths.credentials_file({"CLAUDE_CONFIG_DIR": "/c"}),
+                         Path("/c") / ".credentials.json")
+
     def test_keychain_is_read_when_the_file_is_missing(self):
         answer = mock.Mock(returncode=0, stdout=json.dumps(
             {"claudeAiOauth": {"accessToken": "sk-key"}}))
@@ -100,6 +130,20 @@ class TestUsage(unittest.TestCase):
     def test_scoped_window_found_by_kind_with_label_from_answer(self):
         g = sources.scoped_gauge(usage(None))
         self.assertEqual((g.label, g.percent), ("Fable", 100))
+
+    def test_scoped_window_is_a_model_one_preferably_the_current_model(self):
+        rows = {"limits": [
+            {"kind": "weekly_scoped", "percent": 95, "resets_at": None,
+             "scope": {"model": None, "surface": {"display_name": "Design"}}},
+            {"kind": "weekly_scoped", "percent": 40, "resets_at": None,
+             "scope": {"model": {"id": None, "display_name": "Opus"}}},
+            {"kind": "weekly_scoped", "percent": 70, "resets_at": None,
+             "scope": {"model": {"id": None, "display_name": "Fable"}}}]}
+        self.assertEqual(sources.scoped_gauge(rows, "Opus 5.5").label, "Opus")
+        # Without a match the tightest model window, never the surface one.
+        g = sources.scoped_gauge(rows, "Sonnet 5.5")
+        self.assertEqual((g.label, g.percent), ("Fable", 70))
+        self.assertEqual(sources.scoped_gauge({"limits": rows["limits"][:1]}), None)
 
     def test_reduce_keeps_only_whats_needed(self):
         reduced = sources.reduce_usage(usage(None))

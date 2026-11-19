@@ -120,7 +120,7 @@ def build_status(data, cfg):
             # is the best there is.
             cached = cache.read(path, cache.MAX_AGE)
             if cached is not None:
-                status.scoped = sources.scoped_gauge(cached)
+                status.scoped = sources.scoped_gauge(cached, status.model)
                 # The lookup knows the server's state across all surfaces,
                 # Claude Code's input only this session. Which is fresher
                 # depends on where the last work happened.

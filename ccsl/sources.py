@@ -10,16 +10,18 @@ Every function here catches its own errors. If a source fails, exactly its
 values are missing and everything else stays visible.
 """
 
+import hashlib
 import json
 import os
 import subprocess
+import unicodedata
 import sys
 from datetime import datetime, timezone
 
 from . import i18n, paths
 from .model import Gauge, Status
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 # rate_limit_tier as Claude Code and the API name it -> (display, tier).
 # It only says how big a Max plan is. The plan itself comes from the
@@ -203,6 +205,24 @@ def from_stdin(data, lang="en"):
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 
 
+def keychain_service(env=None):
+    """The name of the keychain entry, built the way Claude Code builds it.
+
+    With an own config folder Claude Code keeps one login per folder and
+    appends the first 8 hex digits of the SHA-256 of the folder, taken as
+    written in the variable. CLAUDE_SECURESTORAGE_CONFIG_DIR takes precedence;
+    set but empty, it means the default entry.
+    """
+    env = os.environ if env is None else env
+    folder = env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+    if folder is None:
+        folder = env.get("CLAUDE_CONFIG_DIR")
+    if not folder:
+        return KEYCHAIN_SERVICE
+    digest = hashlib.sha256(unicodedata.normalize("NFC", folder).encode("utf-8")).hexdigest()
+    return "{}-{}".format(KEYCHAIN_SERVICE, digest[:8])
+
+
 def _oauth_block(data):
     block = data.get("claudeAiOauth") if isinstance(data, dict) else None
     return block if isinstance(block, dict) else {}
@@ -214,7 +234,7 @@ def _keychain(timeout=3):
         return {}
     try:
         out = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+            ["security", "find-generic-password", "-s", keychain_service(), "-w"],
             capture_output=True, text=True, timeout=timeout)
     except Exception:
         return {}
@@ -319,32 +339,35 @@ PROFILE_URL = "https://api.anthropic.com/api/oauth/profile"
 KEPT_WINDOWS = ("session", "weekly_all", "weekly_scoped")
 
 
-def scoped_gauge(usage):
+def scoped_gauge(usage, model=None):
     """The model-scoped weekly window.
 
-    Found by kind == "weekly_scoped", not by model name. The label comes from
-    the answer itself, so the line stays right when another model takes the
-    scoped slot.
+    Found by kind == "weekly_scoped" with a model in its scope, as in Claude
+    Code: a scoped row can also stand for a surface, and that is no model
+    week. The label comes from the answer itself, so the line stays right
+    when another model takes the scoped slot. With several, the current
+    model's window wins, otherwise the fullest one.
     """
     if not isinstance(usage, dict):
         return None
     limits = usage.get("limits")
     if not isinstance(limits, list):
         return None
+    found = []
     for entry in limits:
         if not isinstance(entry, dict) or entry.get("kind") != "weekly_scoped":
             continue
         pct = _number(entry.get("percent"))
-        if pct is None:
-            continue
-        label = "Model"
         scope = entry.get("scope")
-        if isinstance(scope, dict) and isinstance(scope.get("model"), dict):
-            name = scope["model"].get("display_name")
-            if isinstance(name, str) and name:
-                label = name
-        return Gauge("model_week", label, pct, _from_iso(entry.get("resets_at")))
-    return None
+        own = scope.get("model") if isinstance(scope, dict) else None
+        name = own.get("display_name") if isinstance(own, dict) else None
+        if pct is None or not isinstance(name, str) or not name:
+            continue
+        found.append(Gauge("model_week", name, pct, _from_iso(entry.get("resets_at"))))
+    current = (model or "").lower() if isinstance(model, str) else ""
+    matching = [g for g in found if current and g.label.lower() in current]
+    pool = matching or found
+    return max(pool, key=lambda g: g.percent) if pool else None
 
 
 def reduce_usage(usage):

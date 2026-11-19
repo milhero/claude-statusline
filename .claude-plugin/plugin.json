@@ -1,7 +1,7 @@
 {
   "name": "calm-statusline",
   "displayName": "Calm Statusline",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A calm status line for Claude Code: weekly, model and five-hour limits, context and cost per project, always visible.",
   "author": {
     "name": "milhero",

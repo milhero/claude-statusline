@@ -44,6 +44,15 @@ def logs_dir(env=None):
 
 
 def credentials_file(env=None):
+    """Where Claude Code keeps the login outside the macOS keychain.
+
+    CLAUDE_SECURESTORAGE_CONFIG_DIR moves only the login, as in Claude Code;
+    set but empty, it means the default folder.
+    """
+    env = os.environ if env is None else env
+    secure = env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+    if secure is not None:
+        return (Path(secure) if secure else home() / ".claude") / ".credentials.json"
     return claude_dir(env) / ".credentials.json"
 
 

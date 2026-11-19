@@ -28,6 +28,15 @@ class TestInvoices(unittest.TestCase):
         self.assertEqual(inv.daily_fee(date(2025, 1, 1), INVOICES), 0.0)
         self.assertEqual(inv.plan_on(date(2026, 3, 9), INVOICES), "Max 5x")
 
+    def test_plan_names_are_recognised_in_the_usual_spellings(self):
+        for raw, plan in (("Claude Max (20x)", "Max 20x"), ("Max20x", "Max 20x"),
+                          ("max_5x", "Max 5x"), ("Claude Max 5x Abo", "Max 5x"),
+                          ("Pro plan", "Pro"), ("Claude Pro", "Pro"), ("Ultra", "Ultra"),
+                          ("Max", "Max"), ("Enterprise seat", "Enterprise seat")):
+            self.assertEqual(inv.canonical_plan(raw), plan, raw)
+        hand_written = [{"date": "2026-01-24", "amount": 20.0, "plan": "claude pro"}]
+        self.assertEqual(inv.plan_on(date(2026, 2, 1), hand_written), "Pro")
+
     def test_spread(self):
         self.assertEqual(inv.spread({"a": 3, "b": 1}, 4.0), ({"a": 3.0, "b": 1.0}, 0.0))
         self.assertEqual(inv.spread({}, 4.0), ({}, 4.0))
